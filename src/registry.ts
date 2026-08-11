@@ -63,6 +63,8 @@ export async function listRepoStatuses(cfg: ExpertConfig): Promise<RepoStatus[]>
   if (!fs.existsSync(cfg.reposDir)) return [];
   const names = fs
     .readdirSync(cfg.reposDir)
+    // excludeRepos means "pretend this isn't here" — not just "don't sync it".
+    .filter((n) => !cfg.excludeRepos.includes(n))
     .filter((n) => fs.existsSync(path.join(cfg.reposDir, n, '.git')))
     .sort();
   const out: RepoStatus[] = [];

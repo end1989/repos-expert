@@ -1,0 +1,9 @@
+{
+  "reposDir": "./repos",
+  "knowledgeDir": "./knowledge",
+  "model": "claude-sonnet-5",
+  "excludeRepos": [],
+  "includeArchived": false,
+  "curateConcurrency": 2,
+  "curateTimeoutMinutes": 25
+}

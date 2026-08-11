@@ -3,3 +3,6 @@ dist/
 /repos/
 .remember/
 /knowledge/.refresh.lock
+# Personal: names your GitHub account and your own folders.
+# Copy expert.config.example.json to expert.config.json and edit that.
+/expert.config.json

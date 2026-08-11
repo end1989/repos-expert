@@ -24,6 +24,21 @@ function makeCfg(root: string): ExpertConfig {
   };
 }
 
+describe('listRepoStatuses with excludeRepos', () => {
+  it('hides excluded repos entirely, so they are never listed or curated', async () => {
+    const root = makeTempDir('expert-excl-');
+    const cfg = makeCfg(root);
+    for (const name of ['keep-me', 'skip-me']) {
+      const dir = path.join(cfg.reposDir, name);
+      initGitRepo(dir);
+      commitFile(dir, 'a.txt', 'a');
+    }
+    expect((await listRepoStatuses(cfg)).map((s) => s.name)).toEqual(['keep-me', 'skip-me']);
+    const filtered = { ...cfg, excludeRepos: ['skip-me'] };
+    expect((await listRepoStatuses(filtered)).map((s) => s.name)).toEqual(['keep-me']);
+  });
+});
+
 describe('registry', () => {
   let cfg: ExpertConfig;
   let freshSha: string;
