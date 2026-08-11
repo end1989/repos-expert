@@ -9,6 +9,10 @@ live code search as MCP tools. Docs are stamped with the commit they were
 written at; anything stale is flagged so the client trusts live search over
 summaries.
 
+**New here?** [SETUP.md](SETUP.md) is the plain-language walkthrough — or just run
+`.\scripts\setup.ps1`, which installs what's missing, builds the tool, and connects it
+to Claude Desktop.
+
 ## Prerequisites
 
 - **Node 20+** and **git**
