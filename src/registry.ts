@@ -66,7 +66,13 @@ export async function listRepoStatuses(cfg: ExpertConfig): Promise<RepoStatus[]>
     .filter((n) => fs.existsSync(path.join(cfg.reposDir, n, '.git')))
     .sort();
   const out: RepoStatus[] = [];
-  for (const name of names) out.push(await getRepoStatus(cfg, name));
+  for (const name of names) {
+    try {
+      out.push(await getRepoStatus(cfg, name));
+    } catch {
+      // Repos with no commits yet have an unborn HEAD — nothing to curate or search.
+    }
+  }
   return out;
 }
 

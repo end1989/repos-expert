@@ -88,6 +88,17 @@ describe('registry', () => {
     expect((await getRepoStatus(cfg2, 'corrupt-repo')).state).toBe('uncurated');
   });
 
+  it('skips repos with no commits yet (unborn HEAD)', async () => {
+    const root = makeTempDir('expert-reg-empty-');
+    const cfg2 = makeCfg(root);
+    initGitRepo(path.join(cfg2.reposDir, 'empty-repo'));
+    const real = path.join(cfg2.reposDir, 'real-repo');
+    initGitRepo(real);
+    commitFile(real, 'a.txt', 'a');
+    const names = (await listRepoStatuses(cfg2)).map((s) => s.name);
+    expect(names).toEqual(['real-repo']);
+  });
+
   it('builds staleness banners', async () => {
     expect(stalenessBanner(await getRepoStatus(cfg, 'fresh-repo'))).toBe('');
     expect(stalenessBanner(await getRepoStatus(cfg, 'stale-repo'))).toContain(
