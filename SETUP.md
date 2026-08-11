@@ -147,6 +147,18 @@ node dist/cli/index.js refresh          # re-studies only what changed
 You don't have to remember to do this. Answers about out-of-date projects arrive with a
 warning attached, so you'll be told when it's worth re-running.
 
+Or never run it at all — schedule it:
+
+```powershell
+.\scripts\schedule-refresh.ps1                       # Sundays at 03:00
+.\scripts\schedule-refresh.ps1 -Day Wednesday -At 21:30
+.\scripts\schedule-refresh.ps1 -Remove
+```
+
+It only re-studies repos whose code changed, skips the run if the machine is off (and
+catches up next time it's available), and writes its output to
+`%LOCALAPPDATA%\repos-expert\weekly-refresh.log`.
+
 ---
 
 ## When something doesn't work
