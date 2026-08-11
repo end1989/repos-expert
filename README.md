@@ -12,6 +12,7 @@ Claude Desktop and ask "what projects do I have?" — there is nothing to keep r
 the client starts the server itself.
 
 [SETUP.md](SETUP.md) is the full walkthrough, including troubleshooting.
+[ARCHITECTURE.md](ARCHITECTURE.md) explains how it works internally, for anyone changing the code.
 
 ## How it works
 
