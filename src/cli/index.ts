@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { Command } from 'commander';
 import { loadConfig, userConfigPath } from '../config.js';
@@ -13,7 +14,10 @@ import { runRefresh } from './refresh.js';
 
 const program = new Command();
 
-program.name('expert').description('Answers questions about a folder of code repositories').version('0.1.1');
+// Read the real version rather than a literal that silently drifts from package.json.
+const { version } = createRequire(import.meta.url)('../../package.json') as { version: string };
+
+program.name('expert').description('Answers questions about a folder of code repositories').version(version);
 
 program
   .command('init')
