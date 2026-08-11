@@ -6,6 +6,7 @@ import { formatStatus } from './status.js';
 import { listRepoStatuses, getRepoStatus } from '../registry.js';
 import { startMcp } from '../mcp/server.js';
 import { curateRepo, curatePortfolio } from '../curator/curator.js';
+import { curateMany } from './curate-many.js';
 
 const program = new Command();
 
@@ -56,15 +57,7 @@ program
       const statuses = await listRepoStatuses(cfg);
       const targets = opts.stale ? statuses.filter((s) => s.state !== 'fresh') : statuses;
       if (targets.length === 0) console.log('Nothing to curate — everything is fresh.');
-      for (const status of targets) {
-        try {
-          await curateRepo(cfg, status);
-          console.log(`curated ${status.name}`);
-        } catch (err) {
-          failures += 1;
-          console.error(`FAILED ${status.name}: ${err instanceof Error ? err.message : String(err)}`);
-        }
-      }
+      failures += (await curateMany(cfg, targets)).length;
     } else if (!opts.portfolio) {
       console.error('Specify a repo, --all, --stale, or --portfolio.');
       process.exitCode = 1;
