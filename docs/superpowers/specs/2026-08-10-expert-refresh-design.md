@@ -83,6 +83,24 @@ The refresh feature must not introduce machine-specific state, and the README ga
 4. `node dist/cli/index.js refresh` is the only maintenance command anyone needs
    thereafter.
 
+The README also gains a **"Connect your AI tools"** section with copy-paste setup per
+client (all pointing at the same `node <project>/dist/cli/index.js mcp` stdio command):
+
+- **Claude Code (CLI):** the existing `claude mcp add repos-expert -- node ... mcp` line.
+- **Claude Desktop:** the `mcpServers` JSON block for `claude_desktop_config.json`
+  (`{"command": "node", "args": ["<project>/dist/cli/index.js", "mcp"]}`) and where that
+  file lives on Windows/macOS.
+- **GitHub Copilot (VS Code agent mode):** a `.vscode/mcp.json` `servers` block with
+  `"type": "stdio"` and the same command/args, plus a note that Copilot picks it up in
+  agent mode.
+- **Microsoft Copilot (M365/Copilot Studio):** honest status note — it consumes only
+  remote (HTTP) MCP servers, so this local stdio server is not directly connectable;
+  what it would take (host the server behind an HTTP/SSE MCP transport or a bridge) and
+  that this is out of scope for now.
+
+Example snippets use a `<project>` placeholder with one line telling the reader to
+substitute their clone's absolute path.
+
 Everything refresh writes (lockfile included) lives under the config-relative
 `knowledgeDir` — no absolute paths, no registry/env state.
 
