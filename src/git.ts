@@ -29,6 +29,9 @@ export function parseRepoList(json: string): RemoteRepo[] {
 }
 
 export async function listGithubRepos(user: string): Promise<RemoteRepo[]> {
+  if (!/^[A-Za-z0-9-]+$/.test(user)) {
+    throw new Error(`Invalid GitHub username: ${user}`);
+  }
   const { stdout } = await run(
     'gh',
     ['repo', 'list', user, '--limit', '200', '--json', 'name,url,defaultBranchRef,isArchived'],
@@ -38,10 +41,13 @@ export async function listGithubRepos(user: string): Promise<RemoteRepo[]> {
 }
 
 export async function cloneRepo(url: string, dest: string): Promise<void> {
-  await run('git', ['clone', url, dest], OPTS);
+  await run('git', ['clone', '--', url, dest], OPTS);
 }
 
 export async function updateMirror(dir: string, defaultBranch: string): Promise<void> {
+  if (!/^[\w.\/-]+$/.test(defaultBranch) || defaultBranch.startsWith('-')) {
+    throw new Error(`Invalid branch name: ${defaultBranch}`);
+  }
   await run('git', ['fetch', 'origin'], { ...OPTS, cwd: dir });
   await run('git', ['reset', '--hard', `origin/${defaultBranch}`], { ...OPTS, cwd: dir });
 }
@@ -52,12 +58,19 @@ export async function revParseHead(dir: string): Promise<string> {
 }
 
 export async function gitLogOneline(dir: string, limit = 30): Promise<string> {
-  const { stdout } = await run('git', ['log', '--oneline', `-${limit}`], { ...OPTS, cwd: dir });
+  const validLimit = Math.floor(limit);
+  if (validLimit <= 0) {
+    throw new Error(`Limit must be a positive integer, got ${limit}`);
+  }
+  const { stdout } = await run('git', ['log', '--oneline', `-${validLimit}`], { ...OPTS, cwd: dir });
   return stdout.trim();
 }
 
 export async function gitLogRangeStat(dir: string, fromSha: string): Promise<string> {
-  const { stdout } = await run('git', ['log', `${fromSha}..HEAD`, '--stat'], { ...OPTS, cwd: dir });
+  if (!/^[0-9a-f]{4,40}$/i.test(fromSha)) {
+    throw new Error(`Invalid git SHA: ${fromSha}`);
+  }
+  const { stdout } = await run('git', ['log', `${fromSha}..HEAD`, '--stat', '--'], { ...OPTS, cwd: dir });
   return stdout.trim();
 }
 

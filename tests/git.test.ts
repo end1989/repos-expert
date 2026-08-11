@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import path from 'node:path';
-import { parseRepoList, revParseHead, gitLogOneline, listBranches } from '../src/git.js';
+import { parseRepoList, revParseHead, gitLogOneline, listBranches, listGithubRepos, gitLogRangeStat, updateMirror } from '../src/git.js';
 import { makeTempDir, initGitRepo, commitFile } from './helpers.js';
 
 describe('parseRepoList', () => {
@@ -30,5 +30,32 @@ describe('git inspection helpers', () => {
     expect(await revParseHead(dir)).toBe(sha);
     expect(await gitLogOneline(dir)).toContain('first commit');
     expect(await listBranches(dir)).toContain('main');
+  });
+});
+
+describe('input validation', () => {
+  it('listGithubRepos rejects invalid username', async () => {
+    await expect(listGithubRepos('invalid@user')).rejects.toThrow('Invalid GitHub username');
+  });
+
+  it('gitLogRangeStat rejects invalid SHA', async () => {
+    const dir = path.join(makeTempDir('expert-git-'), 'repo');
+    initGitRepo(dir);
+    commitFile(dir, 'a.txt', 'hello');
+    await expect(gitLogRangeStat(dir, 'invalid_sha')).rejects.toThrow('Invalid git SHA');
+  });
+
+  it('updateMirror rejects branch starting with dash', async () => {
+    const dir = path.join(makeTempDir('expert-git-'), 'repo');
+    initGitRepo(dir);
+    await expect(updateMirror(dir, '-main')).rejects.toThrow('Invalid branch name');
+  });
+
+  it('gitLogOneline rejects non-positive limit', async () => {
+    const dir = path.join(makeTempDir('expert-git-'), 'repo');
+    initGitRepo(dir);
+    commitFile(dir, 'a.txt', 'hello');
+    await expect(gitLogOneline(dir, 0)).rejects.toThrow('Limit must be a positive integer');
+    await expect(gitLogOneline(dir, -5)).rejects.toThrow('Limit must be a positive integer');
   });
 });
