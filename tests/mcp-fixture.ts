@@ -24,6 +24,7 @@ export async function makeFixture(): Promise<{ cfg: ExpertConfig; client: Client
     model: 'claude-sonnet-5',
     excludeRepos: [],
     includeArchived: false,
+    curateConcurrency: 4,
   };
 
   // alpha: fresh (meta.sha === HEAD)

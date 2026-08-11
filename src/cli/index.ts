@@ -6,7 +6,7 @@ import { formatStatus } from './status.js';
 import { listRepoStatuses, getRepoStatus } from '../registry.js';
 import { startMcp } from '../mcp/server.js';
 import { curateRepo, curatePortfolio } from '../curator/curator.js';
-import { curateMany } from './curate-many.js';
+import { curateMany, parseConcurrency } from './curate-many.js';
 import { runRefresh } from './refresh.js';
 
 const program = new Command();
@@ -40,6 +40,13 @@ program
     await startMcp(cfg);
   });
 
+interface CurateOptions {
+  all?: boolean;
+  stale?: boolean;
+  portfolio?: boolean;
+  concurrency?: number;
+}
+
 program
   .command('curate')
   .description('Run the curator agent to (re)write knowledge docs')
@@ -47,7 +54,12 @@ program
   .option('--all', 'curate every mirrored repo, then the portfolio')
   .option('--stale', 'curate only stale/uncurated repos, then the portfolio')
   .option('--portfolio', 'run only the portfolio pass')
-  .action(async (repoArg: string | undefined, opts: { all?: boolean; stale?: boolean; portfolio?: boolean }) => {
+  .option(
+    '--concurrency <n>',
+    'repos to curate at once (default: config curateConcurrency)',
+    parseConcurrency,
+  )
+  .action(async (repoArg: string | undefined, opts: CurateOptions) => {
     const cfg = loadConfig();
     let failures = 0;
 
@@ -57,8 +69,10 @@ program
     } else if (opts.all || opts.stale) {
       const statuses = await listRepoStatuses(cfg);
       const targets = opts.stale ? statuses.filter((s) => s.state !== 'fresh') : statuses;
+      const concurrency = opts.concurrency ?? cfg.curateConcurrency;
       if (targets.length === 0) console.log('Nothing to curate — everything is fresh.');
-      failures += (await curateMany(cfg, targets)).length;
+      else console.log(`curating ${targets.length} repos, ${concurrency} at a time`);
+      failures += (await curateMany(cfg, targets, undefined, concurrency)).length;
     } else if (!opts.portfolio) {
       console.error('Specify a repo, --all, --stale, or --portfolio.');
       process.exitCode = 1;

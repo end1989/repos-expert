@@ -47,6 +47,11 @@ To adopt the tool for your own account:
     node dist/cli/index.js refresh          # sync + re-curate stale docs + portfolio (the maintenance one-liner)
     node dist/cli/index.js refresh <name>…  # pull + curate specific repos (adds them if never curated)
     node dist/cli/index.js curate --all     # curate EVERY mirror (slow, uses the model — deliberate act)
+    node dist/cli/index.js curate --stale   # curate only stale/uncurated repos, then the portfolio
+
+Batches curate several repos at once — `curateConcurrency` in `expert.config.json`
+(default 4, max 16), overridable per run with `curate --concurrency <n>`. Raise it to
+finish a large backlog sooner; drop it to `1` if the API rate-limits you.
 
 `refresh` with no arguments never curates repos that have no docs yet — with a large
 account that could be hours of model time. Add repos to the knowledge base explicitly:

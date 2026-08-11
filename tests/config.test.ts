@@ -21,6 +21,7 @@ describe('loadConfig', () => {
     expect(cfg.model).toBe('claude-sonnet-5');
     expect(cfg.excludeRepos).toEqual([]);
     expect(cfg.includeArchived).toBe(false);
+    expect(cfg.curateConcurrency).toBe(4);
   });
 
   it('honors explicit values', () => {
@@ -30,12 +31,19 @@ describe('loadConfig', () => {
       model: 'claude-haiku-4-5-20251001',
       excludeRepos: ['dotfiles'],
       includeArchived: true,
+      curateConcurrency: 6,
     });
     const cfg = loadConfig(p);
     expect(cfg.reposDir).toBe(path.resolve(path.dirname(p), './mirrors'));
     expect(cfg.model).toBe('claude-haiku-4-5-20251001');
     expect(cfg.excludeRepos).toEqual(['dotfiles']);
     expect(cfg.includeArchived).toBe(true);
+    expect(cfg.curateConcurrency).toBe(6);
+  });
+
+  it.each([0, -1, 17, 2.5, '4'])('rejects curateConcurrency %o', (value) => {
+    const p = writeConfig({ githubUser: 'x', curateConcurrency: value });
+    expect(() => loadConfig(p)).toThrow(/curateConcurrency.*integer between 1 and 16/);
   });
 
   it('throws when githubUser is missing', () => {

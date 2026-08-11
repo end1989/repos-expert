@@ -14,6 +14,7 @@ function makeCfg(root: string): ExpertConfig {
     model: 'claude-sonnet-5',
     excludeRepos: [],
     includeArchived: false,
+    curateConcurrency: 4,
   };
 }
 
