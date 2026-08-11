@@ -50,12 +50,15 @@ To hack on the tool itself:
 
 ## Use
 
-    node dist/cli/index.js sync             # mirror all repos from GitHub
-    node dist/cli/index.js status           # fresh / stale / uncurated per repo
-    node dist/cli/index.js refresh          # sync + re-curate stale docs + portfolio (the maintenance one-liner)
-    node dist/cli/index.js refresh <name>…  # pull + curate specific repos (adds them if never curated)
-    node dist/cli/index.js curate --all     # curate EVERY mirror (slow, uses the model — deliberate act)
-    node dist/cli/index.js curate --stale   # curate only stale/uncurated repos, then the portfolio
+    expert init                # first run: write config, connect to Claude Desktop
+    expert status              # what was found, and what has been studied
+    expert refresh <name>…     # study specific repos (adds them if never studied)
+    expert refresh             # update everything, re-study what changed, then the portfolio
+    expert sync                # pull repos from GitHub (optional)
+    expert curate --stale      # study everything not yet studied — slow, uses the model
+    expert curate --portfolio  # redo just the cross-repo map
+
+From a clone, substitute `node dist/cli/index.js` for `expert`.
 
 Batches curate several repos at once — `curateConcurrency` in `expert.config.json`
 (default 4, max 16), overridable per run with `curate --concurrency <n>`. Raise it to
@@ -68,35 +71,36 @@ error message tells you where if a crashed run leaves it behind). The lock only 
 
 ## Connect your AI tools
 
-All clients run the same local command: `node <project>\dist\cli\index.js mcp`
-(substitute `<project>` with your clone's absolute path, e.g. `C:\dev\repos\ai_github_repos_expert`).
+`expert init` does the Claude Desktop case for you. The rest are the same server, so the
+config is nearly identical everywhere. Installed from npm the command is `npx`; from a
+clone it is `node <project>/dist/cli/index.js`.
 
 **Claude Code (CLI):**
 
-    claude mcp add repos-expert -- node <project>\dist\cli\index.js mcp
+    claude mcp add repos-expert -- npx -y repos-expert mcp
 
-**Claude Desktop:** add to `claude_desktop_config.json` (Windows:
-`%APPDATA%\Claude\claude_desktop_config.json`; macOS:
-`~/Library/Application Support/Claude/claude_desktop_config.json`), then restart the app:
+**Claude Desktop:** `%APPDATA%\Claude\claude_desktop_config.json` (Windows) or
+`~/Library/Application Support/Claude/claude_desktop_config.json` (macOS), then restart
+the app from the tray:
 
     {
       "mcpServers": {
         "repos-expert": {
-          "command": "node",
-          "args": ["<project>/dist/cli/index.js", "mcp"]
+          "command": "npx",
+          "args": ["-y", "repos-expert", "mcp"]
         }
       }
     }
 
 **GitHub Copilot (VS Code, agent mode):** create `.vscode/mcp.json` in any workspace
-where you want the tools (or add to your user configuration):
+where you want the tools (or add it to your user configuration):
 
     {
       "servers": {
         "repos-expert": {
           "type": "stdio",
-          "command": "node",
-          "args": ["<project>/dist/cli/index.js", "mcp"]
+          "command": "npx",
+          "args": ["-y", "repos-expert", "mcp"]
         }
       }
     }
@@ -119,7 +123,7 @@ The committed `knowledge/` folder IS the knowledge base — it travels with the 
 2. On the new machine: `gh auth login`, clone the project, then
    `npm install && npm run build && node dist/cli/index.js sync`
 3. Register with your AI tools (section above).
-4. From then on, `node dist/cli/index.js refresh` is the only maintenance command.
+4. From then on, `expert refresh` is the only maintenance command.
 
 ## Curator smoke test (manual, uses the API)
 
