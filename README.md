@@ -9,12 +9,36 @@ live code search as MCP tools. Docs are stamped with the commit they were
 written at; anything stale is flagged so the client trusts live search over
 summaries.
 
+## Prerequisites
+
+- **Node 20+** and **git**
+- **GitHub CLI** (`gh`) logged in to the account whose repos you want (`gh auth login`)
+- **Anthropic auth for curation** — the curator agent needs either an
+  `ANTHROPIC_API_KEY` environment variable or a logged-in Claude Code install on the
+  machine. Everything else (`sync`, `status`, `mcp`, all searching) works without it;
+  only `curate`/`refresh` doc-writing spends model tokens.
+- An MCP client to ask questions from (Claude Code, Claude Desktop, or VS Code with
+  GitHub Copilot — setup below)
+
 ## Setup
 
     npm install
     npm run build
     gh auth status        # needs an authenticated GitHub CLI
     # edit expert.config.json (githubUser, model, excludeRepos)
+
+## Use this for your own repos (not end1989's)
+
+This clone ships with its author's curated knowledge base committed in `knowledge/`.
+To adopt the tool for your own account:
+
+1. Set `githubUser` in `expert.config.json` to your GitHub username.
+2. Start your knowledge base fresh: delete everything inside `knowledge/`.
+3. `node dist/cli/index.js sync`, then curate a first repo to smoke-test:
+   `node dist/cli/index.js refresh <some-small-repo>` — then add the repos you care
+   about the same way. (`curate --all` works but can take hours on a big account.)
+4. Keep your copy in a **private** repository if you curate private code — the
+   knowledge docs describe your codebases in plain markdown.
 
 ## Use
 
