@@ -1,48 +1,51 @@
 # repos-expert
 
-An agent-curated expert on all your GitHub repos, served to Claude Code over MCP.
+Point it at a folder of code repositories. It studies each one, writes down what it
+learned, and serves that to your AI assistant over MCP — so you can ask questions about
+any project, including how they connect to each other.
 
-`expert sync` mirrors every repo from your GitHub account into `repos/`.
-`expert curate` sends a read-only Claude agent into each mirror to write
-markdown knowledge docs (`knowledge/`). `expert mcp` serves those docs plus
-live code search as MCP tools. Docs are stamped with the commit they were
-written at; anything stale is flagged so the client trusts live search over
-summaries.
+    npm install -g repos-expert
+    expert init
 
-**New here?** [SETUP.md](SETUP.md) is the plain-language walkthrough — or just run
-`.\scripts\setup.ps1`, which installs what's missing, builds the tool, and connects it
-to Claude Desktop.
+`expert init` writes your settings and registers the tool with Claude Desktop. Restart
+Claude Desktop and ask "what projects do I have?" — there is nothing to keep running,
+the client starts the server itself.
 
-## Prerequisites
+[SETUP.md](SETUP.md) is the full walkthrough, including troubleshooting.
 
-- **Node 20+** and **git**
-- **GitHub CLI** (`gh`) logged in to the account whose repos you want (`gh auth login`)
-- **Anthropic auth for curation** — the curator agent needs either an
-  `ANTHROPIC_API_KEY` environment variable or a logged-in Claude Code install on the
-  machine. Everything else (`sync`, `status`, `mcp`, all searching) works without it;
-  only `curate`/`refresh` doc-writing spends model tokens.
-- An MCP client to ask questions from (Claude Code, Claude Desktop, or VS Code with
-  GitHub Copilot — setup below)
+## How it works
 
-## Setup
+`expert curate` sends a read-only Claude agent into each repository to write four
+markdown docs: what it does, how it's built, where everything lives, and what was
+recently worked on. A final pass maps the relationships between them. `expert mcp` then
+serves those docs *plus* live ripgrep search and file reads over the real code, so exact
+questions are answered from the source rather than the summary. Every doc is stamped
+with the commit it was written at, and anything stale is flagged in the answer.
 
-    npm install
+`expert sync` can mirror repos from a GitHub account, but that is a convenience — the
+folder is the source of truth, and copying or cloning projects in yourself works
+identically.
+
+## What you need
+
+- **Node 20+** — required.
+- **A folder of repositories** — required. That is the whole input.
+- **An MCP client** to ask questions from: Claude Desktop, Claude Code, or VS Code with
+  GitHub Copilot. Any MCP-aware client works; this is a standard stdio MCP server.
+- **Claude Code signed in, or `ANTHROPIC_API_KEY`** — only for the doc-writing step.
+  Searching, reading, and serving need no model access at all.
+- **`git` and the GitHub CLI** — optional, only for pulling repos from GitHub. Without
+  them the tool says so and carries on with whatever is in the folder.
+
+## Working from a clone
+
+To hack on the tool itself:
+
+    git clone <this repo> && cd repos-expert
+    npm ci
     npm run build
-    gh auth status        # needs an authenticated GitHub CLI
-    # edit expert.config.json (githubUser, model, excludeRepos)
-
-## Use this for your own repos (not the author's)
-
-This clone ships with its author's curated knowledge base committed in `knowledge/`.
-To adopt the tool for your own account:
-
-1. Set `githubUser` in `expert.config.json` to your GitHub username.
-2. Start your knowledge base fresh: delete everything inside `knowledge/`.
-3. `node dist/cli/index.js sync`, then curate a first repo to smoke-test:
-   `node dist/cli/index.js refresh <some-small-repo>` — then add the repos you care
-   about the same way. (`curate --all` works but can take hours on a big account.)
-4. Keep your copy in a **private** repository if you curate private code — the
-   knowledge docs describe your codebases in plain markdown.
+    cp expert.config.example.json expert.config.json   # then edit reposDir
+    npm test
 
 ## Use
 
