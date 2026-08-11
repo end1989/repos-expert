@@ -39,6 +39,13 @@ describe('buildRepoPrompt', () => {
     expect(p).not.toContain('Previous docs');
   });
 
+  it('requires evidence from code for every document, not just interfaces', () => {
+    const p = buildRepoPrompt({ name: 'alpha', gitLog: 'abc first', branches: '* main' });
+    expect(p).toContain('Ground every statement in code you have actually read');
+    expect(p).toContain('evidence of intent — never evidence of behaviour');
+    expect(p).toContain('Absence of a feature is a real finding');
+  });
+
   it('tells the curator to verify interfaces against real code, not docs', () => {
     const p = buildRepoPrompt({ name: 'alpha', gitLog: 'abc first', branches: '* main' });
     expect(p).toContain('interfaces.md');
@@ -77,5 +84,12 @@ describe('buildPortfolioPrompt', () => {
     expect(p).toContain('===FILE: portfolio.md===');
     expect(p).toContain('cross-repo-map.md');
     expect(p).toContain('Never write personal identifiers');
+  });
+
+  it('makes the portfolio pass verify relationships instead of inferring them', () => {
+    const p = buildPortfolioPrompt({ cards: { alpha: 'a' }, manifests: {} });
+    expect(p).toContain('summaries, not primary sources');
+    expect(p).toContain('Verify before asserting');
+    expect(p).toContain('No evidence of a connection');
   });
 });
