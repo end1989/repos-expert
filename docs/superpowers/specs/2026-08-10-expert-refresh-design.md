@@ -14,8 +14,13 @@ needs a single safe entry point: "fetch and pull the repos and update the docs."
 
 `expert refresh [repo...]`
 
-**No arguments:** sync all mirrors → curate every repo whose state is not `fresh`
-(stale + uncurated) → portfolio pass.
+**No arguments:** sync all mirrors → curate every repo whose state is `stale`
+(previously curated, HEAD has moved) → portfolio pass. **Uncurated repos are reported
+with a hint but never auto-curated** — with a large portfolio, curating never-curated
+repos is a deliberate, potentially expensive act of expanding the knowledge base, not
+maintenance; it happens only by explicit name (`expert refresh <name>` /
+`expert curate <name>`). This is a cost guard added after the initial curation ran as a
+14-repo sample of a 155-repo account.
 
 **With repo names:** sync only the named repos (remote list filtered to those names;
 unknown names are reported as failures) → curate the named repos **unconditionally**
@@ -51,7 +56,8 @@ The lock is refresh-only; plain `sync`/`curate` invocations do not take it.
 
 Unit tests with fake deps (no API, no network):
 
-- No-args mode curates exactly the non-fresh statuses.
+- No-args mode curates exactly the stale statuses; uncurated names are returned in the
+  result (reported, not curated).
 - Named mode curates the named repos regardless of state and passes `only` to sync.
 - Unknown name in named mode → reported failure, exit-signal true, run continues.
 - Failure in one repo's curate doesn't stop the rest; portfolio still runs.
