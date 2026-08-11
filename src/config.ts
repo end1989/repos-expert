@@ -3,7 +3,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export interface ExpertConfig {
-  githubUser: string;
+  /** Only needed to pull repos from GitHub; null means "work with whatever is in reposDir". */
+  githubUser: string | null;
   reposDir: string;
   knowledgeDir: string;
   model: string;
@@ -65,10 +66,9 @@ export function loadConfig(configPath?: string): ExpertConfig {
     throw new Error(`Config not found: ${resolvedPath}`);
   }
   const raw = JSON.parse(fs.readFileSync(resolvedPath, 'utf8')) as Record<string, unknown>;
-  if (typeof raw.githubUser !== 'string' || raw.githubUser.length === 0) {
-    throw new Error('expert.config.json: "githubUser" (string) is required');
-  }
-  const merged = { ...DEFAULTS, ...raw } as typeof DEFAULTS & { githubUser: string };
+  const githubUser =
+    typeof raw.githubUser === 'string' && raw.githubUser.length > 0 ? raw.githubUser : null;
+  const merged = { ...DEFAULTS, ...raw } as typeof DEFAULTS;
   if (!isValidConcurrency(merged.curateConcurrency)) {
     throw new Error(
       `expert.config.json: "curateConcurrency" must be an integer between 1 and ${MAX_CURATE_CONCURRENCY}`,
@@ -81,7 +81,7 @@ export function loadConfig(configPath?: string): ExpertConfig {
   }
   const base = path.dirname(resolvedPath);
   return {
-    githubUser: merged.githubUser,
+    githubUser,
     reposDir: path.resolve(base, merged.reposDir),
     knowledgeDir: path.resolve(base, merged.knowledgeDir),
     model: merged.model,

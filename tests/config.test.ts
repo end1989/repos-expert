@@ -48,9 +48,11 @@ describe('loadConfig', () => {
     expect(() => loadConfig(p)).toThrow(/curateConcurrency.*integer between 1 and 16/);
   });
 
-  it('throws when githubUser is missing', () => {
+  it('loads without githubUser — GitHub is optional, the repos folder is not', () => {
     const p = writeConfig({});
-    expect(() => loadConfig(p)).toThrow(/githubUser/);
+    const cfg = loadConfig(p);
+    expect(cfg.githubUser).toBeNull();
+    expect(cfg.reposDir).toBe(path.resolve(path.dirname(p), './repos'));
   });
 
   it('throws when the config file does not exist', () => {

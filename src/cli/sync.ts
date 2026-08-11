@@ -27,6 +27,12 @@ export async function syncRepos(
   only?: string[],
 ): Promise<SyncResult> {
   const result: SyncResult = { synced: [], skipped: [], failed: [] };
+  if (cfg.githubUser === null) {
+    throw new Error(
+      `GitHub sync is not configured — set "githubUser" in expert.config.json to pull repos from GitHub. ` +
+        `Everything else still works on the repos already in ${cfg.reposDir}: curate them, search them, and serve them over MCP.`,
+    );
+  }
   let remote = await deps.listRemote(cfg.githubUser);
   if (only !== undefined) {
     for (const name of only) {

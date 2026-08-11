@@ -53,6 +53,21 @@ function makeDeps(overrides: Partial<RefreshDeps> = {}): { deps: RefreshDeps; ca
 }
 
 describe('runRefresh', () => {
+  it('still curates the local repos when GitHub sync fails entirely', async () => {
+    const cfg = makeCfg(makeTempDir('expert-rf-'));
+    const { deps, calls } = makeDeps({
+      sync: async () => {
+        throw new Error('GitHub sync is not configured — everything else still works');
+      },
+    });
+    const res = await runRefresh(cfg, undefined, deps);
+    expect(calls.curate).toEqual(['stale1']);
+    expect(calls.portfolio).toEqual(['yes']);
+    expect(res.synced).toBe(0);
+    expect(res.syncFailed[0]?.name).toBe('github');
+    expect(res.portfolioOk).toBe(true);
+  });
+
   it('no-args: curates stale only, reports uncurated, runs portfolio', async () => {
     const cfg = makeCfg(makeTempDir('expert-rf-'));
     const { deps, calls } = makeDeps();
@@ -118,12 +133,14 @@ describe('runRefresh', () => {
     const { deps } = makeDeps();
     await runRefresh(cfg, undefined, deps);
     expect(fs.existsSync(lock)).toBe(false);
+    // Sync failure is deliberately survivable, so use a stage that is not:
+    // the lock must still be released when an unexpected error escapes.
     const { deps: badDeps } = makeDeps({
-      sync: async () => {
-        throw new Error('network gone');
+      listStatuses: async () => {
+        throw new Error('registry gone');
       },
     });
-    await expect(runRefresh(cfg, undefined, badDeps)).rejects.toThrow('network gone');
+    await expect(runRefresh(cfg, undefined, badDeps)).rejects.toThrow('registry gone');
     expect(fs.existsSync(lock)).toBe(false);
   });
 });

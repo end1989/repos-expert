@@ -27,6 +27,21 @@ const remote = (name: string, isArchived = false): RemoteRepo => ({
   isArchived,
 });
 
+describe('syncRepos without GitHub', () => {
+  it('explains what still works instead of failing opaquely', async () => {
+    const cfg = { ...makeCfg(makeTempDir('expert-sync-')), githubUser: null };
+    await expect(
+      syncRepos(cfg, {
+        listRemote: async () => {
+          throw new Error('should not be called');
+        },
+        clone: async () => {},
+        update: async () => {},
+      }),
+    ).rejects.toThrow(/not configured[\s\S]*still works/);
+  });
+});
+
 describe('syncRepos', () => {
   it('clones missing repos, updates existing ones, skips excluded and archived', async () => {
     const root = makeTempDir('expert-sync-');

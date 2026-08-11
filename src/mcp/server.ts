@@ -55,6 +55,24 @@ function portfolioStalenessBanner(cfg: ExpertConfig, statuses: RepoStatus[]): st
   return `⚠ portfolio docs are out of date (re-curated since: ${changed.join(', ')}) — run \`expert curate --portfolio\`.\n\n`;
 }
 
+/**
+ * Every tool degrades to "here is what I can still do" rather than an error:
+ * an empty folder is a setup step, not a broken install.
+ */
+export function noReposHint(cfg: ExpertConfig): string {
+  const dirExists = fs.existsSync(cfg.reposDir);
+  return [
+    dirExists
+      ? `No git repositories found in ${cfg.reposDir}.`
+      : `The repos folder does not exist yet: ${cfg.reposDir}.`,
+    'Put repo folders there (clone or copy them in) and they are analyzable immediately —',
+    'code search and file reading need nothing else. Run `expert curate --stale` to add written docs.',
+    cfg.githubUser === null
+      ? 'GitHub is not configured, and is not required.'
+      : `Or run \`expert sync\` to pull them from the GitHub account "${cfg.githubUser}".`,
+  ].join('\n');
+}
+
 function cardSummary(cfg: ExpertConfig, name: string): string {
   const card = knowledgeFile(cfg, 'repos', name, 'card.md');
   if (card === null) return '(uncurated)';
@@ -77,6 +95,7 @@ export function createServer(cfg: ExpertConfig): McpServer {
     },
     async () => {
       const statuses = await listRepoStatuses(cfg);
+      if (statuses.length === 0) return text(noReposHint(cfg));
       const stale = statuses.filter((s) => s.state === 'stale').map((s) => s.name);
       const uncurated = statuses.filter((s) => s.state === 'uncurated').map((s) => s.name);
       const parts: string[] = [];
@@ -107,7 +126,7 @@ export function createServer(cfg: ExpertConfig): McpServer {
     },
     async () => {
       const statuses = await listRepoStatuses(cfg);
-      if (statuses.length === 0) return text('No repos mirrored. Run `expert sync` first.');
+      if (statuses.length === 0) return text(noReposHint(cfg));
       const lines = statuses.map((s) => `${s.name} [${s.state}] — ${cardSummary(cfg, s.name)}`);
       return text(lines.join('\n'));
     },

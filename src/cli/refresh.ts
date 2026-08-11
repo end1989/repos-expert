@@ -4,6 +4,7 @@ import type { ExpertConfig } from '../config.js';
 import { listRepoStatuses, getRepoStatus, type RepoStatus } from '../registry.js';
 import { curatePortfolio } from '../curator/curator.js';
 import { syncRepos, type SyncResult } from './sync.js';
+
 import { curateMany, type CurateOne, type CurateFailure } from './curate-many.js';
 
 export interface RefreshDeps {
@@ -64,7 +65,18 @@ export async function runRefresh(
 ): Promise<RefreshResult> {
   const lock = acquireLock(cfg.knowledgeDir);
   try {
-    const sync = await deps.sync(cfg, names);
+    // A missing or broken GitHub connection must not stop us analysing what is
+    // already on disk — it downgrades to a reported failure, not an abort.
+    let sync: SyncResult;
+    try {
+      sync = await deps.sync(cfg, names);
+    } catch (err) {
+      sync = {
+        synced: [],
+        skipped: [],
+        failed: [{ name: 'github', error: err instanceof Error ? err.message : String(err) }],
+      };
+    }
     const result: RefreshResult = {
       synced: sync.synced.length,
       syncFailed: sync.failed,
