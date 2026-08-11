@@ -7,6 +7,7 @@ import { listRepoStatuses, getRepoStatus } from '../registry.js';
 import { startMcp } from '../mcp/server.js';
 import { curateRepo, curatePortfolio } from '../curator/curator.js';
 import { curateMany } from './curate-many.js';
+import { runRefresh } from './refresh.js';
 
 const program = new Command();
 
@@ -74,6 +75,30 @@ program
       }
     }
     if (failures > 0) process.exitCode = 1;
+  });
+
+program
+  .command('refresh')
+  .description('Sync mirrors, re-curate stale docs (or the named repos), then the portfolio')
+  .argument('[repos...]', 'limit to these repos and curate them unconditionally')
+  .action(async (repos: string[]) => {
+    const cfg = loadConfig();
+    const res = await runRefresh(cfg, repos.length > 0 ? repos : undefined);
+    console.log(
+      `sync: ${res.synced} ok, ${res.syncFailed.length} failed | curate: ${res.curated} ok, ${res.curateFailed.length} failed | portfolio: ${res.portfolioOk ? 'ok' : 'FAILED'}`,
+    );
+    if (res.uncurated.length > 0) {
+      console.log(
+        `uncurated (not auto-curated — add with \`expert refresh <name>\`): ${res.uncurated.join(', ')}`,
+      );
+    }
+    for (const f of [...res.syncFailed, ...res.curateFailed]) {
+      console.error(`  FAILED ${f.name}: ${f.error}`);
+    }
+    if (res.portfolioError !== null) console.error(`  FAILED portfolio: ${res.portfolioError}`);
+    if (res.syncFailed.length + res.curateFailed.length > 0 || !res.portfolioOk) {
+      process.exitCode = 1;
+    }
   });
 
 program.parseAsync().catch((err) => {
