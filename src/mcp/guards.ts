@@ -10,7 +10,17 @@ export function resolveWithin(rootDir: string, relPath: string): string {
   if (abs !== root && !abs.startsWith(root + path.sep)) {
     throw new Error(`Path escapes repository: ${relPath}`);
   }
-  return abs;
+  let real: string;
+  try {
+    real = fs.realpathSync(abs);
+  } catch {
+    return abs; // path doesn't exist yet — lexical check stands; callers handle missing files
+  }
+  const realRoot = fs.realpathSync(root);
+  if (real !== realRoot && !real.startsWith(realRoot + path.sep)) {
+    throw new Error(`Path escapes repository: ${relPath}`);
+  }
+  return real;
 }
 
 export function readFileCapped(absPath: string, startLine?: number, endLine?: number): string {
