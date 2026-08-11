@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -50,13 +51,37 @@ function packageRootConfigPath(): string {
   return path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'expert.config.json');
 }
 
+/**
+ * Per-user config location. This is what makes `npx repos-expert` work: run that
+ * way, the package lives in a throwaway cache folder, so config cannot sit
+ * beside the code.
+ */
+export function userConfigPath(): string {
+  const appData = process.env.APPDATA;
+  if (appData !== undefined && appData.length > 0) {
+    return path.join(appData, 'repos-expert', 'expert.config.json');
+  }
+  const xdg = process.env.XDG_CONFIG_HOME;
+  if (xdg !== undefined && xdg.length > 0) {
+    return path.join(xdg, 'repos-expert', 'expert.config.json');
+  }
+  return path.join(os.homedir(), '.config', 'repos-expert', 'expert.config.json');
+}
+
 function resolveDefaultConfigPath(): string {
-  const cwdCandidate = path.resolve('expert.config.json');
-  if (fs.existsSync(cwdCandidate)) return cwdCandidate;
-  const packageCandidate = packageRootConfigPath();
-  if (fs.existsSync(packageCandidate)) return packageCandidate;
+  const fromEnv = process.env.EXPERT_CONFIG;
+  const candidates = [
+    ...(fromEnv !== undefined && fromEnv.length > 0 ? [path.resolve(fromEnv)] : []),
+    path.resolve('expert.config.json'),
+    userConfigPath(),
+    packageRootConfigPath(),
+  ];
+  const found = candidates.find((c) => fs.existsSync(c));
+  if (found !== undefined) return found;
   throw new Error(
-    `Config not found: tried ${cwdCandidate} and ${packageCandidate}`,
+    `No config found. Run \`expert init\` to create one, or set EXPERT_CONFIG.\nLooked in:\n${candidates
+      .map((c) => `  ${c}`)
+      .join('\n')}`,
   );
 }
 

@@ -10,14 +10,22 @@ Start with the ten or twenty you actually care about.
 
 ## The short version
 
+Install Node once, then two commands:
+
 ```powershell
-git clone <this-repo> repos-expert
-cd repos-expert
-.\scripts\setup.ps1
+npm install -g repos-expert
+expert init
 ```
 
-The script installs what's missing, builds the tool, and connects it to Claude Desktop.
-If you'd rather do it by hand, or something goes wrong, the long version is below.
+`expert init` writes your settings and adds the tool to Claude Desktop for you. Restart
+Claude Desktop, and you're done — there is nothing to keep running. Claude starts the
+tool itself when you open it.
+
+To update later: `npm update -g repos-expert`.
+
+**Working on the tool itself?** Clone it instead and run `.\scripts\setup.ps1`, which
+installs prerequisites, builds from source, and connects the same way. The long version
+below covers that route.
 
 ---
 

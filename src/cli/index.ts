@@ -1,6 +1,8 @@
 #!/usr/bin/env node
+import { fileURLToPath } from 'node:url';
 import { Command } from 'commander';
-import { loadConfig } from '../config.js';
+import { loadConfig, userConfigPath } from '../config.js';
+import { claudeDesktopConfigPath, runInit } from './init.js';
 import { syncRepos } from './sync.js';
 import { formatStatus } from './status.js';
 import { listRepoStatuses, getRepoStatus } from '../registry.js';
@@ -12,6 +14,31 @@ import { runRefresh } from './refresh.js';
 const program = new Command();
 
 program.name('expert').description('Agent-curated expert on all your GitHub repos').version('0.1.0');
+
+program
+  .command('init')
+  .description('Set up config and connect this to Claude Desktop — run this first')
+  .option('--repos-dir <path>', 'folder holding your project folders')
+  .option('--github-user <name>', 'only needed to pull repos from GitHub')
+  .option('--force', 'overwrite an existing config')
+  .option('--skip-client', 'do not touch the Claude Desktop config')
+  .action((opts: { reposDir?: string; githubUser?: string; force?: boolean; skipClient?: boolean }) => {
+    const res = runInit(opts, {
+      configPath: userConfigPath(),
+      clientConfigPath: claudeDesktopConfigPath(),
+      entryPoint: fileURLToPath(import.meta.url),
+    });
+    console.log(
+      res.configWritten ? `Wrote config: ${res.configPath}` : `Config: ${res.configPath}`,
+    );
+    if (res.clientWritten) console.log(`Connected to Claude Desktop: ${res.clientConfigPath}`);
+    for (const note of res.notes) console.log(`  ${note}`);
+    console.log('\nNext:');
+    console.log('  1. Put project folders in the reposDir named above.');
+    console.log('  2. expert status                  # see what it found');
+    console.log('  3. expert refresh <project>       # study one, check the result');
+    console.log('  4. Restart Claude Desktop and ask "What projects do I have?"');
+  });
 
 program
   .command('sync')
