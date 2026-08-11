@@ -67,4 +67,22 @@ describe('syncRepos', () => {
     expect(res.synced).toEqual(['good']);
     expect(res.failed).toEqual([{ name: 'bad', error: 'network down' }]);
   });
+
+  it('with only, syncs just the named repos and fails unknown names', async () => {
+    const root = makeTempDir('expert-sync-');
+    const cfg = makeCfg(root);
+    const calls: string[] = [];
+    const deps: SyncDeps = {
+      listRemote: async () => [remote('alpha'), remote('beta')],
+      clone: async (_url, dest) => {
+        calls.push(`clone:${path.basename(dest)}`);
+        fs.mkdirSync(path.join(dest, '.git'), { recursive: true });
+      },
+      update: async () => {},
+    };
+    const res = await syncRepos(cfg, deps, ['alpha', 'ghost']);
+    expect(calls).toEqual(['clone:alpha']);
+    expect(res.synced).toEqual(['alpha']);
+    expect(res.failed).toEqual([{ name: 'ghost', error: 'not found on GitHub account' }]);
+  });
 });

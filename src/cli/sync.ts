@@ -21,9 +21,21 @@ export interface SyncResult {
   failed: { name: string; error: string }[];
 }
 
-export async function syncRepos(cfg: ExpertConfig, deps: SyncDeps = realDeps): Promise<SyncResult> {
+export async function syncRepos(
+  cfg: ExpertConfig,
+  deps: SyncDeps = realDeps,
+  only?: string[],
+): Promise<SyncResult> {
   const result: SyncResult = { synced: [], skipped: [], failed: [] };
-  const remote = await deps.listRemote(cfg.githubUser);
+  let remote = await deps.listRemote(cfg.githubUser);
+  if (only !== undefined) {
+    for (const name of only) {
+      if (!remote.some((r) => r.name === name)) {
+        result.failed.push({ name, error: 'not found on GitHub account' });
+      }
+    }
+    remote = remote.filter((r) => only.includes(r.name));
+  }
   fs.mkdirSync(cfg.reposDir, { recursive: true });
   for (const repo of remote) {
     if (cfg.excludeRepos.includes(repo.name) || (repo.isArchived && !cfg.includeArchived)) {
