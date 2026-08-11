@@ -3,8 +3,9 @@ import { Command } from 'commander';
 import { loadConfig } from '../config.js';
 import { syncRepos } from './sync.js';
 import { formatStatus } from './status.js';
-import { listRepoStatuses } from '../registry.js';
+import { listRepoStatuses, getRepoStatus } from '../registry.js';
 import { startMcp } from '../mcp/server.js';
+import { curateRepo, curatePortfolio } from '../curator/curator.js';
 
 const program = new Command();
 
@@ -35,6 +36,51 @@ program
   .action(async () => {
     const cfg = loadConfig();
     await startMcp(cfg);
+  });
+
+program
+  .command('curate')
+  .description('Run the curator agent to (re)write knowledge docs')
+  .argument('[repo]', 'curate a single repo')
+  .option('--all', 'curate every mirrored repo, then the portfolio')
+  .option('--stale', 'curate only stale/uncurated repos, then the portfolio')
+  .option('--portfolio', 'run only the portfolio pass')
+  .action(async (repoArg: string | undefined, opts: { all?: boolean; stale?: boolean; portfolio?: boolean }) => {
+    const cfg = loadConfig();
+    let failures = 0;
+
+    if (repoArg !== undefined) {
+      await curateRepo(cfg, await getRepoStatus(cfg, repoArg));
+      console.log(`curated ${repoArg}`);
+    } else if (opts.all || opts.stale) {
+      const statuses = await listRepoStatuses(cfg);
+      const targets = opts.stale ? statuses.filter((s) => s.state !== 'fresh') : statuses;
+      if (targets.length === 0) console.log('Nothing to curate — everything is fresh.');
+      for (const status of targets) {
+        try {
+          await curateRepo(cfg, status);
+          console.log(`curated ${status.name}`);
+        } catch (err) {
+          failures += 1;
+          console.error(`FAILED ${status.name}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+    } else if (!opts.portfolio) {
+      console.error('Specify a repo, --all, --stale, or --portfolio.');
+      process.exitCode = 1;
+      return;
+    }
+
+    if (opts.all || opts.stale || opts.portfolio) {
+      try {
+        await curatePortfolio(cfg);
+        console.log('curated portfolio');
+      } catch (err) {
+        failures += 1;
+        console.error(`FAILED portfolio: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    if (failures > 0) process.exitCode = 1;
   });
 
 program.parseAsync().catch((err) => {
