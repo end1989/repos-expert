@@ -4,6 +4,7 @@ import { loadConfig } from '../config.js';
 import { syncRepos } from './sync.js';
 import { formatStatus } from './status.js';
 import { listRepoStatuses } from '../registry.js';
+import { startMcp } from '../mcp/server.js';
 
 const program = new Command();
 
@@ -26,6 +27,14 @@ program
   .action(async () => {
     const cfg = loadConfig();
     console.log(formatStatus(await listRepoStatuses(cfg)));
+  });
+
+program
+  .command('mcp')
+  .description('Start the MCP server on stdio (for `claude mcp add`)')
+  .action(async () => {
+    const cfg = loadConfig();
+    await startMcp(cfg);
   });
 
 program.parseAsync().catch((err) => {

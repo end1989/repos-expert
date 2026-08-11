@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import type { ExpertConfig } from '../config.js';
 import {
@@ -9,6 +10,8 @@ import {
   stalenessBanner,
   type RepoStatus,
 } from '../registry.js';
+import { searchText, listFiles } from '../rg.js';
+import { resolveWithin, readFileCapped } from './guards.js';
 
 export function text(t: string): { content: [{ type: 'text'; text: string }] } {
   return { content: [{ type: 'text', text: t }] };
@@ -108,5 +111,67 @@ export function createServer(cfg: ExpertConfig): McpServer {
     },
   );
 
+  server.registerTool(
+    'search_knowledge',
+    {
+      description: 'Full-text search across all curated knowledge docs.',
+      inputSchema: { query: z.string() },
+    },
+    async ({ query }) => text(await searchText(cfg.knowledgeDir, query)),
+  );
+
+  server.registerTool(
+    'search_code',
+    {
+      description:
+        'Live ripgrep over the repo mirrors. Searches all repos unless "repo" is given. "glob" filters file names (e.g. *.ts).',
+      inputSchema: { query: z.string(), repo: z.string().optional(), glob: z.string().optional() },
+    },
+    async ({ query, repo, glob }) => {
+      if (repo === undefined) return text(await searchText(cfg.reposDir, query, glob));
+      const status = await requireRepo(cfg, repo);
+      return text(stalenessBanner(status) + (await searchText(status.path, query, glob)));
+    },
+  );
+
+  server.registerTool(
+    'find_files',
+    {
+      description: 'List files matching a glob pattern, in one repo or all mirrors.',
+      inputSchema: { pattern: z.string(), repo: z.string().optional() },
+    },
+    async ({ pattern, repo }) => {
+      const root = repo === undefined ? cfg.reposDir : (await requireRepo(cfg, repo)).path;
+      return text(await listFiles(root, pattern));
+    },
+  );
+
+  server.registerTool(
+    'read_repo_file',
+    {
+      description:
+        'Read one file from a repo mirror (max 2,000 lines / 200 KB). Lines are 1-based inclusive.',
+      inputSchema: {
+        repo: z.string(),
+        path: z.string(),
+        startLine: z.number().int().min(1).optional(),
+        endLine: z.number().int().min(1).optional(),
+      },
+    },
+    async ({ repo, path: relPath, startLine, endLine }) => {
+      const status = await requireRepo(cfg, repo);
+      const abs = resolveWithin(status.path, relPath);
+      if (!fs.existsSync(abs)) {
+        throw new Error(`File not found in "${repo}": ${relPath}`);
+      }
+      return text(stalenessBanner(status) + readFileCapped(abs, startLine, endLine));
+    },
+  );
+
   return server;
+}
+
+export async function startMcp(cfg: ExpertConfig): Promise<void> {
+  const server = createServer(cfg);
+  await server.connect(new StdioServerTransport());
 }
