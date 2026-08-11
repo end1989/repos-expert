@@ -24,7 +24,7 @@ describe('parseCuratedDocs', () => {
   it('throws listing every missing or empty doc', () => {
     const output = '===FILE: card.md===\n# card\n===FILE: map.md===\n\n';
     expect(() => parseCuratedDocs(output, DOC_FILES)).toThrow(
-      /architecture\.md.*map\.md.*activity\.md|missing docs/,
+      'Curator output missing docs: architecture.md, map.md, activity.md',
     );
   });
 });
