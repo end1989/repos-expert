@@ -92,7 +92,7 @@ program
         `uncurated (not auto-curated — add with \`expert refresh <name>\`): ${res.uncurated.join(', ')}`,
       );
     }
-    for (const f of [...res.syncFailed, ...res.curateFailed]) {
+    for (const f of res.syncFailed) {
       console.error(`  FAILED ${f.name}: ${f.error}`);
     }
     if (res.portfolioError !== null) console.error(`  FAILED portfolio: ${res.portfolioError}`);

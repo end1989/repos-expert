@@ -105,7 +105,7 @@ describe('runRefresh', () => {
     fs.mkdirSync(cfg.knowledgeDir, { recursive: true });
     fs.writeFileSync(lock, JSON.stringify({ pid: 1, startedAt: '2026-08-11T00:00:00Z' }));
     const { deps, calls } = makeDeps();
-    await expect(runRefresh(cfg, undefined, deps)).rejects.toThrow(/Another refresh appears to be running \(started 2026-08-11T00:00:00Z\)/);
+    await expect(runRefresh(cfg, undefined, deps)).rejects.toThrow(/Another refresh appears to be running \(started 2026-08-11T00:00:00Z\)\. If that is stale, delete .+\.refresh\.lock and retry\./);
     expect(calls.sync).toEqual([]);
     fs.rmSync(lock);
   });

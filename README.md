@@ -27,7 +27,7 @@ summaries.
 `refresh` with no arguments never curates repos that have no docs yet — with a large
 account that could be hours of model time. Add repos to the knowledge base explicitly:
 `refresh <name>`. Only one refresh can run at a time (lockfile in `knowledge/`; the
-error message tells you where if a crashed run leaves it behind).
+error message tells you where if a crashed run leaves it behind). The lock only guards refresh against refresh — don't run `refresh` while a `curate --all`/`--stale` batch is active.
 
 ## Connect your AI tools
 
