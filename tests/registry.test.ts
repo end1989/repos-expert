@@ -65,6 +65,10 @@ describe('registry', () => {
     expect((await getRepoStatus(cfg, 'bare-repo')).state).toBe('uncurated');
   });
 
+  it('rejects path-traversal repo names', async () => {
+    await expect(getRepoStatus(cfg, '../escape')).rejects.toThrow(/Invalid repo name/);
+  });
+
   it('lists all mirrored repos sorted by name', async () => {
     const names = (await listRepoStatuses(cfg)).map((s) => s.name);
     expect(names).toEqual(['bare-repo', 'fresh-repo', 'stale-repo']);

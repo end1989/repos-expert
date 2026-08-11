@@ -38,6 +38,9 @@ export function writeMeta(knowledgeDir: string, name: string, meta: RepoMeta): v
 }
 
 export async function getRepoStatus(cfg: ExpertConfig, name: string): Promise<RepoStatus> {
+  if (!/^[A-Za-z0-9._-]+$/.test(name) || name === '.' || name === '..') {
+    throw new Error(`Invalid repo name: ${name}`);
+  }
   const repoPath = path.join(cfg.reposDir, name);
   const currentSha = await revParseHead(repoPath);
   const meta = readMeta(cfg.knowledgeDir, name);
