@@ -106,9 +106,9 @@ function writeConfig(obj: unknown): string {
 
 describe('loadConfig', () => {
   it('applies defaults and resolves paths against the config directory', () => {
-    const p = writeConfig({ githubUser: 'end1989' });
+    const p = writeConfig({ githubUser: 'example-user' });
     const cfg = loadConfig(p);
-    expect(cfg.githubUser).toBe('end1989');
+    expect(cfg.githubUser).toBe('example-user');
     expect(cfg.reposDir).toBe(path.resolve(path.dirname(p), './repos'));
     expect(cfg.knowledgeDir).toBe(path.resolve(path.dirname(p), './knowledge'));
     expect(cfg.model).toBe('claude-sonnet-5');
@@ -2241,7 +2241,7 @@ Create `expert.config.json`:
 
 ```json
 {
-  "githubUser": "end1989",
+  "githubUser": "<your-github-username>",
   "reposDir": "./repos",
   "knowledgeDir": "./knowledge",
   "model": "claude-sonnet-5",

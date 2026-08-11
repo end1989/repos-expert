@@ -27,7 +27,7 @@ summaries.
     gh auth status        # needs an authenticated GitHub CLI
     # edit expert.config.json (githubUser, model, excludeRepos)
 
-## Use this for your own repos (not end1989's)
+## Use this for your own repos (not the author's)
 
 This clone ships with its author's curated knowledge base committed in `knowledge/`.
 To adopt the tool for your own account:

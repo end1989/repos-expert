@@ -131,7 +131,7 @@ Behavior rules:
 
 ```json
 {
-  "githubUser": "end1989",
+  "githubUser": "<your-github-username>",
   "reposDir": "./repos",
   "knowledgeDir": "./knowledge",
   "model": "claude-sonnet-5",
