@@ -13,7 +13,7 @@ import { runRefresh } from './refresh.js';
 
 const program = new Command();
 
-program.name('expert').description('Agent-curated expert on all your GitHub repos').version('0.1.0');
+program.name('expert').description('Answers questions about a folder of code repositories').version('0.1.1');
 
 program
   .command('init')
@@ -42,7 +42,7 @@ program
 
 program
   .command('sync')
-  .description('Clone or update all GitHub repos into the mirror folder')
+  .description('Pull repos from GitHub into your repos folder (optional — you can copy them in instead)')
   .action(async () => {
     const cfg = loadConfig();
     const res = await syncRepos(cfg);
@@ -53,7 +53,7 @@ program
 
 program
   .command('status')
-  .description('Show curation status for every mirrored repo')
+  .description('Show what was found in your repos folder and what has been studied')
   .action(async () => {
     const cfg = loadConfig();
     console.log(formatStatus(await listRepoStatuses(cfg)));
@@ -61,7 +61,7 @@ program
 
 program
   .command('mcp')
-  .description('Start the MCP server on stdio (for `claude mcp add`)')
+  .description('Start the MCP server on stdio (for Claude Desktop, Claude Code, Copilot, or any MCP client)')
   .action(async () => {
     const cfg = loadConfig();
     await startMcp(cfg);
@@ -78,7 +78,7 @@ program
   .command('curate')
   .description('Run the curator agent to (re)write knowledge docs')
   .argument('[repo]', 'curate a single repo')
-  .option('--all', 'curate every mirrored repo, then the portfolio')
+  .option('--all', 'study every repo in the folder, then the portfolio')
   .option('--stale', 'curate only stale/uncurated repos, then the portfolio')
   .option('--portfolio', 'run only the portfolio pass')
   .option(
@@ -120,7 +120,7 @@ program
 
 program
   .command('refresh')
-  .description('Sync mirrors, re-curate stale docs (or the named repos), then the portfolio')
+  .description('Update repos, re-study anything out of date (or the named repos), then the portfolio')
   .argument('[repos...]', 'limit to these repos and curate them unconditionally')
   .action(async (repos: string[]) => {
     const cfg = loadConfig();

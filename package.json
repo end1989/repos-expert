@@ -1,7 +1,7 @@
 {
   "name": "repos-expert",
-  "version": "0.1.0",
-  "description": "Turns a folder of code repositories into a knowledge base your AI assistant can answer questions from, over MCP.",
+  "version": "0.1.1",
+  "description": "Answers questions about a folder of code repositories — studies each one, writes a knowledge base, and serves it over MCP.",
   "license": "MIT",
   "type": "module",
   "bin": {

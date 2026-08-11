@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
@@ -83,8 +84,13 @@ function cardSummary(cfg: ExpertConfig, name: string): string {
   return (line ?? '(empty card)').slice(0, 120);
 }
 
+// Read the real version rather than a literal that silently drifts from package.json.
+const { version: SERVER_VERSION } = createRequire(import.meta.url)('../../package.json') as {
+  version: string;
+};
+
 export function createServer(cfg: ExpertConfig): McpServer {
-  const server = new McpServer({ name: 'repos-expert', version: '0.1.0' });
+  const server = new McpServer({ name: 'repos-expert', version: SERVER_VERSION });
 
   server.registerTool(
     'portfolio_overview',
@@ -121,7 +127,7 @@ export function createServer(cfg: ExpertConfig): McpServer {
   server.registerTool(
     'list_repos',
     {
-      description: 'List every mirrored repo with curation state and a one-line summary.',
+      description: 'List every repo available, with a one-line summary and whether its docs are current.',
       inputSchema: {},
     },
     async () => {
@@ -166,7 +172,7 @@ export function createServer(cfg: ExpertConfig): McpServer {
     'search_code',
     {
       description:
-        'Live ripgrep over the repo mirrors. Searches all repos unless "repo" is given. "glob" filters file names (e.g. *.ts).',
+        'Search the real source code of the repos, right now. Searches all repos unless "repo" is given. "glob" filters file names (e.g. *.ts).',
       inputSchema: { query: z.string(), repo: z.string().optional(), glob: z.string().optional() },
     },
     async ({ query, repo, glob }) => {
@@ -179,7 +185,7 @@ export function createServer(cfg: ExpertConfig): McpServer {
   server.registerTool(
     'find_files',
     {
-      description: 'List files matching a glob pattern, in one repo or all mirrors.',
+      description: 'List files matching a glob pattern, in one repo or across all of them.',
       inputSchema: { pattern: z.string(), repo: z.string().optional() },
     },
     async ({ pattern, repo }) => {
@@ -192,7 +198,7 @@ export function createServer(cfg: ExpertConfig): McpServer {
     'read_repo_file',
     {
       description:
-        'Read one file from a repo mirror (max 2,000 lines / 200 KB). Lines are 1-based inclusive.',
+        'Read one file from a repo (max 2,000 lines / 200 KB). Lines are 1-based inclusive.',
       inputSchema: {
         repo: z.string(),
         path: z.string(),
