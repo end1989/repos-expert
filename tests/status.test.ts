@@ -1,0 +1,29 @@
+import { describe, it, expect } from 'vitest';
+import { formatStatus } from '../src/cli/status.js';
+import type { RepoStatus } from '../src/registry.js';
+
+const status = (name: string, state: RepoStatus['state']): RepoStatus => ({
+  name,
+  path: `/repos/${name}`,
+  currentSha: 'abcdef1234567890',
+  curatedSha: state === 'uncurated' ? null : 'fedcba0987654321',
+  curatedAt: state === 'uncurated' ? null : '2026-08-10T00:00:00Z',
+  state,
+});
+
+describe('formatStatus', () => {
+  it('renders one line per repo with state, head, and curated sha', () => {
+    const out = formatStatus([status('alpha', 'fresh'), status('beta', 'uncurated')]);
+    const lines = out.split('\n');
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toContain('fresh');
+    expect(lines[0]).toContain('alpha');
+    expect(lines[0]).toContain('abcdef1');
+    expect(lines[1]).toContain('uncurated');
+    expect(lines[1]).toContain('-');
+  });
+
+  it('tells the user to sync when there are no repos', () => {
+    expect(formatStatus([])).toContain('expert sync');
+  });
+});
