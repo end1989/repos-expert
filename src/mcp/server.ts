@@ -15,6 +15,9 @@ export function text(t: string): { content: [{ type: 'text'; text: string }] } {
 }
 
 export async function requireRepo(cfg: ExpertConfig, name: string): Promise<RepoStatus> {
+  if (!/^[A-Za-z0-9._-]+$/.test(name) || name === '.' || name === '..') {
+    throw new Error(`Unknown repo "${name}" — call list_repos to see what exists.`);
+  }
   if (!fs.existsSync(path.join(cfg.reposDir, name, '.git'))) {
     throw new Error(`Unknown repo "${name}" — call list_repos to see what exists.`);
   }

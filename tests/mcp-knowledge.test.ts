@@ -53,4 +53,13 @@ describe('MCP knowledge tools', () => {
     expect(res.isError).toBe(true);
     expect(resultText(res)).toContain('Unknown repo');
   });
+
+  it('rejects path-traversal repo names', async () => {
+    const res = await client.callTool({
+      name: 'get_repo_knowledge',
+      arguments: { repo: '../escape' },
+    });
+    expect(res.isError).toBe(true);
+    expect(resultText(res)).toContain('Unknown repo');
+  });
 });
