@@ -1,4 +1,5 @@
 node_modules/
 dist/
-repos/
+/repos/
 .remember/
+/knowledge/.refresh.lock
