@@ -24,6 +24,7 @@ const fourDocs = [
   '===FILE: architecture.md===\n# arch body',
   '===FILE: map.md===\n# map body',
   '===FILE: activity.md===\n# activity body',
+  '===FILE: interfaces.md===\n# interfaces body',
 ].join('\n');
 
 describe('curateRepo', () => {

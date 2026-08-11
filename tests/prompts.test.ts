@@ -24,7 +24,7 @@ describe('parseCuratedDocs', () => {
   it('throws listing every missing or empty doc', () => {
     const output = '===FILE: card.md===\n# card\n===FILE: map.md===\n\n';
     expect(() => parseCuratedDocs(output, DOC_FILES)).toThrow(
-      'Curator output missing docs: architecture.md, map.md, activity.md',
+      'Curator output missing docs: architecture.md, map.md, activity.md, interfaces.md',
     );
   });
 });
@@ -37,6 +37,13 @@ describe('buildRepoPrompt', () => {
     expect(p).toContain('===FILE: card.md===');
     expect(p).toContain('architecture.md');
     expect(p).not.toContain('Previous docs');
+  });
+
+  it('tells the curator to verify interfaces against real code, not docs', () => {
+    const p = buildRepoPrompt({ name: 'alpha', gitLog: 'abc first', branches: '* main' });
+    expect(p).toContain('interfaces.md');
+    expect(p).toContain('list only what the running code actually');
+    expect(p).toContain('Documented but not implemented');
   });
 
   it('forbids personal identifiers in the docs', () => {

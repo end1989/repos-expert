@@ -1,4 +1,10 @@
-export const DOC_FILES = ['card.md', 'architecture.md', 'map.md', 'activity.md'] as const;
+export const DOC_FILES = [
+  'card.md',
+  'architecture.md',
+  'map.md',
+  'activity.md',
+  'interfaces.md',
+] as const;
 
 export interface RepoContext {
   name: string;
@@ -17,7 +23,20 @@ const TEMPLATES = `Required sections per document:
 - card.md: Purpose · Tech stack · Status (active/dormant/archived) · Entry points · How to run · Related repos
 - architecture.md: Overview · Key modules (with paths) · Data flow · External dependencies/services · Design decisions & conventions
 - map.md: Annotated directory tree — for each significant directory/file, one line on what happens there
-- activity.md: Recent focus (from git log) · Open branches and what they contain · Apparent unfinished work / TODOs`;
+- activity.md: Recent focus (from git log) · Open branches and what they contain · Apparent unfinished work / TODOs
+- interfaces.md: the repo's contract surface, each entry citing the file:line that defines it —
+  HTTP routes (method + path) · CLI commands and flags · public exports or library entry points ·
+  environment variables and config keys · data models, tables, or collections ·
+  outbound calls this repo makes to other services (URL, host:port, or queue)
+
+interfaces.md has one rule above all others: **list only what the running code actually
+defines.** READMEs, planning notes, chat transcripts, and design docs routinely describe
+endpoints, flags, and tables that were never built. Verify each entry against real source
+before listing it. When something is described in documentation but absent from the code,
+put it under a final "Documented but not implemented" section and say where the claim came
+from. An interface list that quietly mixes the two is worse than no list. If the repo has
+no contract surface of a given kind, write "none" for that section rather than inventing
+one.`;
 
 const PRIVACY_RULE = `Never write personal identifiers into the docs: no GitHub account or user names, no email addresses, and no remote URLs that contain them. Name repositories by their bare name ("my-repo", not "github.com/someone/my-repo"), and describe authorship generically ("the sole author", "a single contributor") rather than naming or quoting people.`;
 

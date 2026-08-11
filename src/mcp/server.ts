@@ -142,10 +142,10 @@ export function createServer(cfg: ExpertConfig): McpServer {
     'get_repo_knowledge',
     {
       description:
-        'Curated knowledge docs for one repo: card (default), architecture, map, or activity.',
+        'Curated knowledge docs for one repo. "interfaces" is the verified contract surface — routes, CLI commands, exports, env vars, data models, outbound calls — and is usually the fastest answer to "what does this expose?".',
       inputSchema: {
         repo: z.string(),
-        doc: z.enum(['card', 'architecture', 'map', 'activity']).optional(),
+        doc: z.enum(['card', 'architecture', 'map', 'activity', 'interfaces']).optional(),
       },
     },
     async ({ repo, doc }) => {
