@@ -125,9 +125,10 @@ The committed `knowledge/` folder IS the knowledge base — it travels with the 
 3. Register with your AI tools (section above).
 4. From then on, `expert refresh` is the only maintenance command.
 
-## Curator smoke test (manual, uses the API)
+## Smoke test (spends model tokens)
 
-    node dist/cli/index.js refresh git-practice-2
+    expert refresh <some-small-repo>
 
-Inspect `knowledge/repos/git-practice-2/` — the four docs should read like someone
-actually explored the code, and `status` should show the repo `fresh`.
+Inspect `knowledge/repos/<name>/` — the four docs should read like someone actually
+explored the code, and `expert status` should show the repo `fresh`. Always do this on
+one repo before starting a large batch.
