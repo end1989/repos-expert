@@ -25,6 +25,9 @@ export function resolveWithin(rootDir: string, relPath: string): string {
 
 export function readFileCapped(absPath: string, startLine?: number, endLine?: number): string {
   const stat = fs.statSync(absPath);
+  if (stat.isDirectory()) {
+    throw new Error(`Path is a directory, not a file: ${absPath}`);
+  }
   if (stat.size > 5 * 1024 * 1024) {
     throw new Error('File too large to read (over 5 MB).');
   }

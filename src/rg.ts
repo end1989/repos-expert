@@ -18,7 +18,7 @@ async function rg(args: string[], cwd: string): Promise<string> {
   } catch (err) {
     const e = err as { code?: number; stderr?: string };
     if (e.code === 1) return ''; // rg exit 1 = no matches
-    throw new Error(`ripgrep failed: ${e.stderr ?? String(err)}`);
+    throw new Error(`ripgrep failed: ${e.stderr || String(err)}`);
   }
 }
 

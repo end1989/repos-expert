@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
+import fs from 'node:fs';
+import path from 'node:path';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { makeFixture, resultText } from './mcp-fixture.js';
 
@@ -61,5 +63,21 @@ describe('MCP knowledge tools', () => {
     });
     expect(res.isError).toBe(true);
     expect(resultText(res)).toContain('Unknown repo');
+  });
+
+  it('portfolio_overview flags stale portfolio docs when a recorded repo sha no longer matches', async () => {
+    const { cfg, client: freshClient } = await makeFixture();
+    fs.writeFileSync(
+      path.join(cfg.knowledgeDir, 'portfolio-meta.json'),
+      JSON.stringify({
+        curatedAt: '2026-08-01T00:00:00Z',
+        repos: { alpha: 'deadbeef'.repeat(5) },
+      }),
+    );
+    const text = resultText(
+      await freshClient.callTool({ name: 'portfolio_overview', arguments: {} }),
+    );
+    expect(text).toContain('portfolio docs are out of date');
+    expect(text).toContain('alpha');
   });
 });

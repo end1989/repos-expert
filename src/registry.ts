@@ -28,7 +28,11 @@ function metaPath(knowledgeDir: string, name: string): string {
 export function readMeta(knowledgeDir: string, name: string): RepoMeta | null {
   const p = metaPath(knowledgeDir, name);
   if (!fs.existsSync(p)) return null;
-  return JSON.parse(fs.readFileSync(p, 'utf8')) as RepoMeta;
+  try {
+    return JSON.parse(fs.readFileSync(p, 'utf8')) as RepoMeta;
+  } catch {
+    return null;
+  }
 }
 
 export function writeMeta(knowledgeDir: string, name: string, meta: RepoMeta): void {

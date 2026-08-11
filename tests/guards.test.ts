@@ -83,4 +83,8 @@ describe('readFileCapped', () => {
     const byteLength = Buffer.byteLength(out, 'utf8');
     expect(byteLength).toBeLessThan(MAX_READ_BYTES + 100); // Some buffer for the notice text
   });
+
+  it('rejects reading a directory', () => {
+    expect(() => readFileCapped(dir)).toThrow(/directory/);
+  });
 });

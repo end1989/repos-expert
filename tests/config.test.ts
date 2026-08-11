@@ -46,4 +46,20 @@ describe('loadConfig', () => {
   it('throws when the config file does not exist', () => {
     expect(() => loadConfig('C:/nope/expert.config.json')).toThrow(/not found/i);
   });
+
+  it('with no argument, prefers an expert.config.json in the current working directory', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'expert-cfg-cwd-'));
+    fs.writeFileSync(
+      path.join(dir, 'expert.config.json'),
+      JSON.stringify({ githubUser: 'distinctive-cwd-user' }),
+    );
+    const originalCwd = process.cwd();
+    process.chdir(dir);
+    try {
+      const cfg = loadConfig();
+      expect(cfg.githubUser).toBe('distinctive-cwd-user');
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
 });

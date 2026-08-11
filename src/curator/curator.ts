@@ -100,8 +100,8 @@ export async function curateRepo(
   });
   const dir = path.join(cfg.knowledgeDir, 'repos', status.name);
   fs.mkdirSync(dir, { recursive: true });
-  for (const [file, content] of Object.entries(docs)) {
-    fs.writeFileSync(path.join(dir, file), content + '\n');
+  for (const file of DOC_FILES) {
+    fs.writeFileSync(path.join(dir, file), docs[file] + '\n');
   }
   writeMeta(cfg.knowledgeDir, status.name, {
     sha: status.currentSha,
@@ -118,18 +118,24 @@ export async function curatePortfolio(
   runner: AgentRunner = runClaudeAgent,
 ): Promise<void> {
   const statuses = await listRepoStatuses(cfg);
-  const curated = statuses.filter((s) => s.curatedSha !== null);
+  let curated = statuses.filter((s) => s.curatedSha !== null);
   if (curated.length === 0) {
     throw new Error('No curated repos yet — run `expert curate --all` first.');
   }
   const cards: Record<string, string> = {};
   const manifests: Record<string, string> = {};
-  for (const s of curated) {
-    cards[s.name] = fs.readFileSync(path.join(cfg.knowledgeDir, 'repos', s.name, 'card.md'), 'utf8');
+  curated = curated.filter((s) => {
+    const cardPath = path.join(cfg.knowledgeDir, 'repos', s.name, 'card.md');
+    if (!fs.existsSync(cardPath)) return false;
+    cards[s.name] = fs.readFileSync(cardPath, 'utf8');
     for (const mf of MANIFEST_FILES) {
       const p = path.join(s.path, mf);
       if (fs.existsSync(p)) manifests[`${s.name}/${mf}`] = fs.readFileSync(p, 'utf8').slice(0, 4000);
     }
+    return true;
+  });
+  if (curated.length === 0) {
+    throw new Error('No curated repos yet — run `expert curate --all` first.');
   }
   const prompt = buildPortfolioPrompt({ cards, manifests });
   const docs = await onceWithRetry(async () => {
@@ -141,8 +147,8 @@ export async function curatePortfolio(
     return parseCuratedDocs(output, ['portfolio.md', 'cross-repo-map.md']);
   });
   fs.mkdirSync(cfg.knowledgeDir, { recursive: true });
-  for (const [file, content] of Object.entries(docs)) {
-    fs.writeFileSync(path.join(cfg.knowledgeDir, file), content + '\n');
+  for (const file of ['portfolio.md', 'cross-repo-map.md'] as const) {
+    fs.writeFileSync(path.join(cfg.knowledgeDir, file), docs[file] + '\n');
   }
   const repoShas: Record<string, string> = {};
   for (const s of curated) repoShas[s.name] = s.curatedSha as string;

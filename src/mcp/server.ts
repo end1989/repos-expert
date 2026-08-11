@@ -7,6 +7,7 @@ import type { ExpertConfig } from '../config.js';
 import {
   getRepoStatus,
   listRepoStatuses,
+  readMeta,
   stalenessBanner,
   type RepoStatus,
 } from '../registry.js';
@@ -30,6 +31,28 @@ export async function requireRepo(cfg: ExpertConfig, name: string): Promise<Repo
 function knowledgeFile(cfg: ExpertConfig, ...segments: string[]): string | null {
   const p = path.join(cfg.knowledgeDir, ...segments);
   return fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : null;
+}
+
+function portfolioStalenessBanner(cfg: ExpertConfig, statuses: RepoStatus[]): string {
+  let recorded: Record<string, string> | undefined;
+  try {
+    const raw = fs.readFileSync(path.join(cfg.knowledgeDir, 'portfolio-meta.json'), 'utf8');
+    recorded = (JSON.parse(raw) as { repos?: Record<string, string> }).repos;
+  } catch {
+    return '';
+  }
+  if (recorded === undefined) return '';
+  const changed: string[] = [];
+  for (const s of statuses) {
+    if (s.curatedSha === null) continue;
+    const currentSha = readMeta(cfg.knowledgeDir, s.name)?.sha;
+    const recordedSha = recorded[s.name];
+    if (recordedSha === undefined || recordedSha !== currentSha) {
+      changed.push(s.name);
+    }
+  }
+  if (changed.length === 0) return '';
+  return `⚠ portfolio docs are out of date (re-curated since: ${changed.join(', ')}) — run \`expert curate --portfolio\`.\n\n`;
 }
 
 function cardSummary(cfg: ExpertConfig, name: string): string {
@@ -72,7 +95,7 @@ export function createServer(cfg: ExpertConfig): McpServer {
           `uncurated: ${uncurated.length > 0 ? uncurated.join(', ') : 'none'}`,
         ].join('\n'),
       );
-      return text(parts.join('\n\n---\n\n'));
+      return text(portfolioStalenessBanner(cfg, statuses) + parts.join('\n\n---\n\n'));
     },
   );
 

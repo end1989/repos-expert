@@ -101,7 +101,7 @@ fresh/stale/uncurated flag. Convenience view of the same staleness computation u
 ## Component: MCP server (`expert mcp`, stdio)
 
 Package name `repos-expert`, CLI binary `expert`. Registered once with
-`claude mcp add repos-expert -- node C:\dev\repos\ai_github_repos_expert\dist\cli.js mcp`. Tools:
+`claude mcp add repos-expert -- node C:\dev\repos\ai_github_repos_expert\dist\cli\index.js mcp`. Tools:
 
 | Tool | Input | Output |
 | --- | --- | --- |

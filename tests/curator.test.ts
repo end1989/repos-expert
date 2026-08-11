@@ -103,6 +103,25 @@ describe('curateRepo', () => {
     expect(attempts).toBe(2);
     expect(readMeta(cfg.knowledgeDir, 'alpha')).not.toBeNull();
   });
+
+  it('ignores unexpected marker names from model output and writes only the allowlisted docs', async () => {
+    const root = makeTempDir('expert-cur-');
+    const cfg = makeCfg(root);
+    const repo = path.join(cfg.reposDir, 'alpha');
+    initGitRepo(repo);
+    commitFile(repo, 'a.ts', 'x', 'init');
+    const maliciousOutput = `${fourDocs}\n===FILE: ../evil.md===\npwned`;
+    await curateRepo(cfg, await getRepoStatus(cfg, 'alpha'), async () => maliciousOutput);
+    const dir = path.join(cfg.knowledgeDir, 'repos', 'alpha');
+    expect(fs.readFileSync(path.join(dir, 'card.md'), 'utf8')).toContain('card body');
+    expect(fs.readFileSync(path.join(dir, 'architecture.md'), 'utf8')).toContain('arch body');
+    expect(fs.readFileSync(path.join(dir, 'map.md'), 'utf8')).toContain('map body');
+    expect(fs.readFileSync(path.join(dir, 'activity.md'), 'utf8')).toContain('activity body');
+    expect(fs.existsSync(path.join(cfg.knowledgeDir, 'repos', 'evil.md'))).toBe(false);
+    expect(
+      fs.existsSync(path.join(cfg.knowledgeDir, 'repos', 'alpha', '..', 'evil.md')),
+    ).toBe(false);
+  });
 });
 
 describe('curatePortfolio', () => {

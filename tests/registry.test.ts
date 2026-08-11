@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll } from 'vitest';
+import fs from 'node:fs';
 import path from 'node:path';
 import type { ExpertConfig } from '../src/config.js';
 import {
@@ -72,6 +73,19 @@ describe('registry', () => {
   it('lists all mirrored repos sorted by name', async () => {
     const names = (await listRepoStatuses(cfg)).map((s) => s.name);
     expect(names).toEqual(['bare-repo', 'fresh-repo', 'stale-repo']);
+  });
+
+  it('treats a corrupted meta.json as uncurated', async () => {
+    const root = makeTempDir('expert-reg-corrupt-');
+    const cfg2 = makeCfg(root);
+    const repo = path.join(cfg2.reposDir, 'corrupt-repo');
+    initGitRepo(repo);
+    commitFile(repo, 'a.txt', 'a');
+    const metaFile = path.join(cfg2.knowledgeDir, 'repos', 'corrupt-repo', 'meta.json');
+    fs.mkdirSync(path.dirname(metaFile), { recursive: true });
+    fs.writeFileSync(metaFile, '{not valid json');
+    expect(readMeta(cfg2.knowledgeDir, 'corrupt-repo')).toBeNull();
+    expect((await getRepoStatus(cfg2, 'corrupt-repo')).state).toBe('uncurated');
   });
 
   it('builds staleness banners', async () => {
