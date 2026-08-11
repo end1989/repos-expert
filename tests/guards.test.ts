@@ -1,9 +1,21 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
 import { resolveWithin, readFileCapped, MAX_READ_LINES, MAX_READ_BYTES } from '../src/mcp/guards.js';
 import { makeTempDir } from './helpers.js';
+
+// Set up junction capability check at module scope
+let junctionOk = false;
+const junctionTestDirs = { realRoot: '', outsideDir: '', linkPath: '' };
+try {
+  junctionTestDirs.realRoot = makeTempDir('guard-root-');
+  junctionTestDirs.outsideDir = makeTempDir('guard-outside-');
+  junctionTestDirs.linkPath = path.join(junctionTestDirs.realRoot, 'link');
+  fs.symlinkSync(junctionTestDirs.outsideDir, junctionTestDirs.linkPath, 'junction');
+  junctionOk = true;
+} catch {
+  junctionOk = false;
+}
 
 describe('resolveWithin', () => {
   const root = 'C:/some/repo';
@@ -25,25 +37,9 @@ describe('resolveWithin', () => {
     expect(() => resolveWithin(realRoot, evilPath)).toThrow(/escapes/);
   });
 
-  it('rejects symlink/junction escapes', () => {
-    const realRoot = makeTempDir('guard-root-');
-    const outsideDir = makeTempDir('guard-outside-');
-    const linkPath = path.join(realRoot, 'link');
-
-    let canCreateJunction = true;
-    try {
-      fs.symlinkSync(outsideDir, linkPath, 'junction');
-    } catch {
-      canCreateJunction = false;
-    }
-
-    if (!canCreateJunction) {
-      expect(true).toBe(true);
-      return;
-    }
-
-    fs.writeFileSync(path.join(outsideDir, 'secret.txt'), 'secret data');
-    expect(() => resolveWithin(realRoot, 'link/secret.txt')).toThrow(/escapes/);
+  it.runIf(junctionOk)('rejects paths that escape via a symlink/junction', () => {
+    fs.writeFileSync(path.join(junctionTestDirs.outsideDir, 'secret.txt'), 'secret data');
+    expect(() => resolveWithin(junctionTestDirs.realRoot, 'link/secret.txt')).toThrow(/escapes/);
   });
 });
 
