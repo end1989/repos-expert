@@ -15,6 +15,7 @@ function makeCfg(root: string, extra: Partial<ExpertConfig> = {}): ExpertConfig 
     excludeRepos: [],
     includeArchived: false,
     curateConcurrency: 4,
+    curateTimeoutMinutes: 25,
     ...extra,
   };
 }

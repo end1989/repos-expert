@@ -22,6 +22,7 @@ describe('loadConfig', () => {
     expect(cfg.excludeRepos).toEqual([]);
     expect(cfg.includeArchived).toBe(false);
     expect(cfg.curateConcurrency).toBe(4);
+    expect(cfg.curateTimeoutMinutes).toBe(25);
   });
 
   it('honors explicit values', () => {
@@ -32,6 +33,7 @@ describe('loadConfig', () => {
       excludeRepos: ['dotfiles'],
       includeArchived: true,
       curateConcurrency: 6,
+      curateTimeoutMinutes: 40,
     });
     const cfg = loadConfig(p);
     expect(cfg.reposDir).toBe(path.resolve(path.dirname(p), './mirrors'));

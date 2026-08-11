@@ -11,10 +11,15 @@ export interface ExpertConfig {
   includeArchived: boolean;
   /** How many repos a curate batch works on at once. */
   curateConcurrency: number;
+  /** How long one curator agent may run before it is aborted. */
+  curateTimeoutMinutes: number;
 }
 
 /** Upper bound on parallel curator agents — each one spawns a CLI subprocess. */
 export const MAX_CURATE_CONCURRENCY = 16;
+
+/** Upper bound on the per-repo curator timeout. */
+export const MAX_CURATE_TIMEOUT_MINUTES = 120;
 
 const DEFAULTS = {
   reposDir: './repos',
@@ -23,7 +28,16 @@ const DEFAULTS = {
   excludeRepos: [] as string[],
   includeArchived: false,
   curateConcurrency: 4,
+  curateTimeoutMinutes: 25,
 };
+
+export function isValidTimeoutMinutes(value: unknown): value is number {
+  return (
+    Number.isInteger(value) &&
+    (value as number) >= 1 &&
+    (value as number) <= MAX_CURATE_TIMEOUT_MINUTES
+  );
+}
 
 export function isValidConcurrency(value: unknown): value is number {
   return Number.isInteger(value) && (value as number) >= 1 && (value as number) <= MAX_CURATE_CONCURRENCY;
@@ -60,6 +74,11 @@ export function loadConfig(configPath?: string): ExpertConfig {
       `expert.config.json: "curateConcurrency" must be an integer between 1 and ${MAX_CURATE_CONCURRENCY}`,
     );
   }
+  if (!isValidTimeoutMinutes(merged.curateTimeoutMinutes)) {
+    throw new Error(
+      `expert.config.json: "curateTimeoutMinutes" must be an integer between 1 and ${MAX_CURATE_TIMEOUT_MINUTES}`,
+    );
+  }
   const base = path.dirname(resolvedPath);
   return {
     githubUser: merged.githubUser,
@@ -69,5 +88,6 @@ export function loadConfig(configPath?: string): ExpertConfig {
     excludeRepos: merged.excludeRepos,
     includeArchived: Boolean(merged.includeArchived),
     curateConcurrency: merged.curateConcurrency,
+    curateTimeoutMinutes: merged.curateTimeoutMinutes,
   };
 }

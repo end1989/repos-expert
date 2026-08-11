@@ -17,7 +17,10 @@ import {
 } from './prompts.js';
 
 export const DOC_VERSION = 1;
-export const CURATE_TIMEOUT_MS = 600_000;
+
+function timeoutMsFor(cfg: ExpertConfig): number {
+  return cfg.curateTimeoutMinutes * 60_000;
+}
 
 export interface RunOpts {
   cwd: string;
@@ -94,7 +97,7 @@ export async function curateRepo(
     const output = await runner(prompt, {
       cwd: status.path,
       model: cfg.model,
-      timeoutMs: CURATE_TIMEOUT_MS,
+      timeoutMs: timeoutMsFor(cfg),
     });
     return parseCuratedDocs(output, DOC_FILES);
   });
@@ -142,7 +145,7 @@ export async function curatePortfolio(
     const output = await runner(prompt, {
       cwd: cfg.reposDir,
       model: cfg.model,
-      timeoutMs: CURATE_TIMEOUT_MS,
+      timeoutMs: timeoutMsFor(cfg),
     });
     return parseCuratedDocs(output, ['portfolio.md', 'cross-repo-map.md']);
   });

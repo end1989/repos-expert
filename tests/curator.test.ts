@@ -15,6 +15,7 @@ function makeCfg(root: string): ExpertConfig {
     excludeRepos: [],
     includeArchived: false,
     curateConcurrency: 4,
+    curateTimeoutMinutes: 25,
   };
 }
 
@@ -45,6 +46,20 @@ describe('curateRepo', () => {
     expect(meta?.docVersion).toBe(DOC_VERSION);
     expect(prompts[0]).toContain('"alpha"');
     expect(prompts[0]).not.toContain('Previous docs');
+  });
+
+  it('gives the runner the timeout from config, not a fixed constant', async () => {
+    const root = makeTempDir('expert-cur-');
+    const cfg = { ...makeCfg(root), curateTimeoutMinutes: 25 };
+    const repo = path.join(cfg.reposDir, 'alpha');
+    initGitRepo(repo);
+    commitFile(repo, 'a.ts', 'x');
+    let seen = 0;
+    await curateRepo(cfg, await getRepoStatus(cfg, 'alpha'), async (_p, opts) => {
+      seen = opts.timeoutMs;
+      return fourDocs;
+    });
+    expect(seen).toBe(25 * 60_000);
   });
 
   it('passes previous docs and change log in incremental mode', async () => {

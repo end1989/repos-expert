@@ -39,6 +39,12 @@ describe('buildRepoPrompt', () => {
     expect(p).not.toContain('Previous docs');
   });
 
+  it('forbids personal identifiers in the docs', () => {
+    const p = buildRepoPrompt({ name: 'alpha', gitLog: 'abc first', branches: '* main' });
+    expect(p).toContain('Never write personal identifiers');
+    expect(p).toContain('email addresses');
+  });
+
   it('switches to update mode when previous docs exist', () => {
     const p = buildRepoPrompt({
       name: 'alpha',
@@ -63,5 +69,6 @@ describe('buildPortfolioPrompt', () => {
     expect(p).toContain('"name":"alpha"');
     expect(p).toContain('===FILE: portfolio.md===');
     expect(p).toContain('cross-repo-map.md');
+    expect(p).toContain('Never write personal identifiers');
   });
 });

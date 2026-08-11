@@ -14,6 +14,7 @@ function makeCfg(root: string, curateConcurrency = 4): ExpertConfig {
     excludeRepos: [],
     includeArchived: false,
     curateConcurrency,
+    curateTimeoutMinutes: 25,
   };
 }
 
