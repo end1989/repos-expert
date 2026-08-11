@@ -73,7 +73,7 @@ describe('runInit', () => {
     fs.writeFileSync(clientConfigPath, JSON.stringify({ mcpServers: { other: { command: 'x' } } }));
 
     const res = runInit(
-      { reposDir: 'C:/code' },
+      { reposDir: 'C:/code', skipWorkspaceGuide: true },
       { configPath, clientConfigPath, entryPoint: '/tmp/node_modules/repos-expert/dist/cli/index.js' },
     );
 
@@ -85,16 +85,35 @@ describe('runInit', () => {
     expect(client.mcpServers['repos-expert'].command).toBe('npx');
   });
 
+  it('writes a workspace CLAUDE.md but never clobbers one that exists', () => {
+    const root = makeTempDir('expert-init-');
+    const reposDir = path.join(root, 'code');
+    const configPath = path.join(root, 'expert.config.json');
+
+    runInit({ reposDir, skipClient: true }, { configPath, clientConfigPath: null, entryPoint: 'x' });
+    const guide = fs.readFileSync(path.join(reposDir, 'CLAUDE.md'), 'utf8');
+    expect(guide).toMatch(/repositories are open to you/i);
+    expect(guide).toMatch(/interfaces/);
+
+    fs.writeFileSync(path.join(reposDir, 'CLAUDE.md'), 'MY OWN NOTES');
+    const second = runInit(
+      { reposDir, skipClient: true, force: true },
+      { configPath, clientConfigPath: null, entryPoint: 'x' },
+    );
+    expect(fs.readFileSync(path.join(reposDir, 'CLAUDE.md'), 'utf8')).toBe('MY OWN NOTES');
+    expect(second.notes.join(' ')).toMatch(/Left your existing/);
+  });
+
   it('never overwrites an existing config unless forced', () => {
     const root = makeTempDir('expert-init-');
     const configPath = path.join(root, 'expert.config.json');
     fs.writeFileSync(configPath, '{"reposDir":"C:/mine"}');
 
-    const kept = runInit({ reposDir: 'C:/other', skipClient: true }, { configPath, clientConfigPath: null, entryPoint: 'x' });
+    const kept = runInit({ reposDir: 'C:/other', skipClient: true, skipWorkspaceGuide: true }, { configPath, clientConfigPath: null, entryPoint: 'x' });
     expect(kept.configWritten).toBe(false);
     expect(fs.readFileSync(configPath, 'utf8')).toContain('C:/mine');
 
-    const forced = runInit({ reposDir: 'C:/other', force: true, skipClient: true }, { configPath, clientConfigPath: null, entryPoint: 'x' });
+    const forced = runInit({ reposDir: 'C:/other', force: true, skipClient: true, skipWorkspaceGuide: true }, { configPath, clientConfigPath: null, entryPoint: 'x' });
     expect(forced.configWritten).toBe(true);
     expect(fs.readFileSync(configPath, 'utf8')).toContain('C:/other');
   });
@@ -103,7 +122,7 @@ describe('runInit', () => {
     expect(claudeDesktopConfigPath('linux')).toBeNull();
     const root = makeTempDir('expert-init-');
     const res = runInit(
-      {},
+      { skipWorkspaceGuide: true },
       { configPath: path.join(root, 'expert.config.json'), clientConfigPath: null, entryPoint: 'x' },
     );
     expect(res.clientWritten).toBe(false);

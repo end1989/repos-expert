@@ -74,6 +74,13 @@ export function noReposHint(cfg: ExpertConfig): string {
   ].join('\n');
 }
 
+/** Reminds the client, at the point of use, that this was written — and is checkable. */
+export function provenanceFooter(status: RepoStatus): string {
+  const written =
+    status.curatedSha === null ? 'not yet written' : `written at ${status.curatedSha.slice(0, 7)}`;
+  return `\n\n---\nSummary ${written}; the repo is at ${status.currentSha.slice(0, 7)}. Read the source with search_code / read_repo_file on "${status.name}" to confirm anything specific.`;
+}
+
 function cardSummary(cfg: ExpertConfig, name: string): string {
   const card = knowledgeFile(cfg, 'repos', name, 'card.md');
   if (card === null) return '(uncurated)';
@@ -89,8 +96,45 @@ const { version: SERVER_VERSION } = createRequire(import.meta.url)('../../packag
   version: string;
 };
 
+/**
+ * Sent to the client once at connect. The knowledge docs are a model's written
+ * summary, not ground truth, and the client is holding tools that can check them —
+ * saying so is what keeps a stale sentence from becoming a confident wrong answer.
+ */
+export const SERVER_INSTRUCTIONS = `This server answers questions about a collection of code repositories.
+
+Two kinds of information, and they are not equally authoritative:
+
+1. Written knowledge (portfolio_overview, list_repos, get_repo_knowledge,
+   search_knowledge). Documents an AI agent wrote after reading each repository:
+   purpose, architecture, directory map, recent activity, and interfaces. They carry
+   understanding you cannot get from grep — why a project exists, how repos relate —
+   but they are a snapshot, written at a specific commit, and code moves on.
+
+2. The actual source code (search_code, find_files, read_repo_file). Always current,
+   always literal.
+
+Use the documents to orient and to answer conceptual and cross-repo questions. Then:
+
+- The repositories are open to you. If something in a document looks wrong, contradicts
+  itself, or does not match what the user is describing, go read the code and settle it.
+  You do not need permission, and you do not need to ask first.
+- Verify what matters, not everything. Re-checking every sentence wastes the point of
+  having summaries. Do check before stating something the user will act on: an exact
+  endpoint, a function signature, a file path, whether a feature actually exists.
+- A ⚠ banner means the documents are older than the code. Treat those claims as leads to
+  confirm, not as facts.
+- interfaces.md is the verified contract surface (routes, commands, exports, env vars,
+  data models). It separates what the code implements from what is only described in
+  documentation — respect that distinction when you quote it.
+- If the documents and the code disagree, the code wins. Say so plainly to the user, and
+  mention that re-running \`expert refresh <repo>\` will bring the documents back in line.`;
+
 export function createServer(cfg: ExpertConfig): McpServer {
-  const server = new McpServer({ name: 'repos-expert', version: SERVER_VERSION });
+  const server = new McpServer(
+    { name: 'repos-expert', version: SERVER_VERSION },
+    { instructions: SERVER_INSTRUCTIONS },
+  );
 
   server.registerTool(
     'portfolio_overview',
@@ -153,9 +197,12 @@ export function createServer(cfg: ExpertConfig): McpServer {
       const file = `${doc ?? 'card'}.md`;
       const content = knowledgeFile(cfg, 'repos', repo, file);
       if (content === null) {
-        return text(`No curated ${file} for "${repo}" yet — run \`expert curate ${repo}\`.`);
+        return text(
+          `No curated ${file} for "${repo}" yet — run \`expert curate ${repo}\`. ` +
+            `You can still read the code directly with search_code, find_files, and read_repo_file.`,
+        );
       }
-      return text(stalenessBanner(status) + content);
+      return text(stalenessBanner(status) + content + provenanceFooter(status));
     },
   );
 

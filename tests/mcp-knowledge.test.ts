@@ -3,6 +3,33 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { makeFixture, resultText } from './mcp-fixture.js';
+import { SERVER_INSTRUCTIONS, provenanceFooter } from '../src/mcp/server.js';
+
+describe('telling the client how much to trust the docs', () => {
+  it('grants permission to go read the code, and says the code wins', () => {
+    expect(SERVER_INSTRUCTIONS).toMatch(/repositories are open to you/i);
+    expect(SERVER_INSTRUCTIONS).toMatch(/do not need permission/i);
+    expect(SERVER_INSTRUCTIONS).toMatch(/the code wins/i);
+  });
+
+  it('warns against re-verifying everything, which would defeat the summaries', () => {
+    expect(SERVER_INSTRUCTIONS).toMatch(/Verify what matters, not everything/i);
+  });
+
+  it('footer names both commits and the repo to check against', () => {
+    const footer = provenanceFooter({
+      name: 'alpha',
+      path: '/repos/alpha',
+      currentSha: 'b'.repeat(40),
+      curatedSha: 'a'.repeat(40),
+      curatedAt: '2026-08-11T00:00:00Z',
+      state: 'stale',
+    });
+    expect(footer).toContain('written at aaaaaaa');
+    expect(footer).toContain('repo is at bbbbbbb');
+    expect(footer).toContain('"alpha"');
+  });
+});
 
 describe('MCP knowledge tools', () => {
   let client: Client;

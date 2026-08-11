@@ -22,7 +22,14 @@ program
   .option('--github-user <name>', 'only needed to pull repos from GitHub')
   .option('--force', 'overwrite an existing config')
   .option('--skip-client', 'do not touch the Claude Desktop config')
-  .action((opts: { reposDir?: string; githubUser?: string; force?: boolean; skipClient?: boolean }) => {
+  .option('--skip-workspace-guide', 'do not write CLAUDE.md into your repos folder')
+  .action((opts: {
+    reposDir?: string;
+    githubUser?: string;
+    force?: boolean;
+    skipClient?: boolean;
+    skipWorkspaceGuide?: boolean;
+  }) => {
     const res = runInit(opts, {
       configPath: userConfigPath(),
       clientConfigPath: claudeDesktopConfigPath(),
