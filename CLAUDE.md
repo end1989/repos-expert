@@ -18,6 +18,11 @@ with a confusing error. Diagnostics go to stderr.
 Repo names are validated against `/^[A-Za-z0-9._-]+$/` before they reach a path or a
 command line — that check is what stops `../` from becoming a file read outside the folder.
 
+**URLs in `repos.txt` go through a transport allowlist** (https, http, ssh, git, file,
+and the `user@host:path` form). It is an allowlist rather than a denylist because git's
+`ext::` transport runs a shell command — a URL pasted from a chat window must not reach
+it. The derived folder name goes through the same name check as everything else.
+
 **Caps are load-bearing.** 100 search matches, 2,000 lines / 200 KB per file read. They
 exist because results land in someone's context window, not for speed. Don't relax them
 without a reason that accounts for that.

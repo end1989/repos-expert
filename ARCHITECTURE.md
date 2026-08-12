@@ -23,9 +23,10 @@ repos/<name>/          →  curator agent  →  knowledge/repos/<name>/*.md  →
 (a folder of git repos)   (read-only)       (+ meta.json with the sha)      (+ live ripgrep)
 ```
 
-1. **Collect** — `expert sync` mirrors repos from GitHub, or you copy folders in. The
-   folder is the source of truth; GitHub is optional and its absence is reported, never
-   fatal.
+1. **Collect** — three interchangeable routes into the folder: copy folders in yourself,
+   list git URLs in `repos.txt` (`expert add` / `expert sync`), or mirror a whole GitHub
+   account. The folder is the source of truth; every route into it is optional, and each
+   one's absence is reported, never fatal.
 2. **Study** — `expert curate` runs one Claude agent per repo with `Read`/`Glob`/`Grep`
    only. The agent returns the documents as text; the CLI writes the files. The agent has
    no write access.

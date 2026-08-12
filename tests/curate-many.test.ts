@@ -9,6 +9,7 @@ function makeCfg(root: string, curateConcurrency = 4): ExpertConfig {
   return {
     githubUser: 'u',
     reposDir: path.join(root, 'repos'),
+    reposListFile: path.join(root, 'repos', 'repos.txt'),
     knowledgeDir: path.join(root, 'knowledge'),
     model: 'claude-sonnet-5',
     excludeRepos: [],

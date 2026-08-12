@@ -10,18 +10,54 @@ Start with the ten or twenty you actually care about.
 
 ## The short version
 
-Install Node once, then two commands:
+Install Node once, then:
 
 ```powershell
 npm install -g repos-expert
 expert init
 ```
 
-`expert init` writes your settings and adds the tool to Claude Desktop for you. Restart
-Claude Desktop, and you're done — there is nothing to keep running. Claude starts the
-tool itself when you open it.
+`expert init` asks where your projects are, writes your settings, and adds the tool to
+Claude Desktop for you. There is nothing to keep running — Claude starts the tool itself.
+
+Then get your projects into that folder. Either way works:
+
+```powershell
+expert add https://github.com/acme/billing-api.git    # clones it, and remembers it
+```
+
+or copy/clone the folders in yourself — anything containing a `.git` is picked up
+automatically.
+
+Finally, study one and check the result:
+
+```powershell
+expert refresh billing-api
+```
+
+Restart Claude Desktop and ask *"what projects do I have?"*
 
 To update later: `npm update -g repos-expert`.
+
+### Where the list of projects lives
+
+`repos.txt`, in your projects folder — the same folder `expert init` set up. It is plain
+text, one git URL per line, and opening it in Notepad is a perfectly good way to edit it:
+
+```
+# Projects for repos-expert to study.
+https://github.com/acme/billing-api.git
+git@github.com:acme/checkout-service.git
+billing = https://gitlab.com/acme/some-very-long-repository-name.git
+```
+
+`expert sync` clones anything on that list that isn't on disk yet, and fast-forwards the
+ones that are — it never discards local commits, so listing a repo you actively work in
+is safe. `expert add <url>` does the editing and the cloning in one step.
+
+You do not have to use the list at all. It exists so there is one obvious place to answer
+"how do I tell it about my services?" — but a folder you copied projects into works
+exactly the same. To keep the list somewhere else, set `reposListFile` in your config.
 
 **Working on the tool itself?** Clone it instead and run `.\scripts\setup.ps1`, which
 installs prerequisites, builds from source, and connects the same way. The long version
@@ -78,9 +114,14 @@ Open `expert.config.json` and set where your projects live:
 }
 ```
 
-That's it. `reposDir` is any folder containing project folders. If you also want repos
-pulled down from GitHub, add `"githubUser": "your-username"` and run `node dist/cli/index.js sync`
-— otherwise skip it entirely, and copy or clone project folders in yourself.
+That's it. `reposDir` is any folder containing project folders — it can be a folder you
+already work in. Projects get there three ways, and you can mix them freely:
+
+- copy or clone folders in yourself;
+- list git URLs in `repos.txt` inside that folder, then `node dist/cli/index.js sync`;
+- add `"githubUser": "your-username"` to pull a whole GitHub account on `sync`.
+
+Set `reposListFile` if you would rather keep the list somewhere other than `repos.txt`.
 
 Check that it sees them:
 
@@ -163,8 +204,16 @@ catches up next time it's available), and writes its output to
 
 ## When something doesn't work
 
-**"No git repositories found"** — `reposDir` is pointing at the wrong folder, or the
-folders in it aren't git repositories. The tool prints the exact path it looked in.
+**"No projects found"** — `reposDir` is pointing at the wrong folder, or the folders in
+it aren't git repositories. The tool prints the exact path it looked in. To move it, edit
+`reposDir` in your config, or re-run `expert init --repos-dir "<path>" --force`.
+
+**You have a folder with nothing but `CLAUDE.md` and `repos.txt` in it** — that is a
+fresh, empty setup. Either it guessed the wrong folder (fix `reposDir` as above) or no
+projects have been added yet (`expert add <url>`, or copy folders in).
+
+**"Nothing to sync yet"** — `repos.txt` has no URLs in it and no `githubUser` is set.
+That's not a failure; copying folders in by hand needs neither.
 
 **GitHub sync fails, or you never set it up** — that's fine and it says so. Everything
 else keeps working on the folders already on disk.

@@ -7,9 +7,18 @@ any project, including how they connect to each other.
     npm install -g repos-expert
     expert init
 
-`expert init` writes your settings and registers the tool with Claude Desktop. Restart
-Claude Desktop and ask "what projects do I have?" — there is nothing to keep running,
-the client starts the server itself.
+`expert init` asks where your projects are, writes your settings, and registers the tool
+with Claude Desktop. There is nothing to keep running — the client starts the server
+itself.
+
+Getting projects into that folder, whichever suits you:
+
+    expert add https://github.com/acme/billing-api.git    # clones it and remembers it
+    # or copy/clone folders in yourself — anything with a .git is picked up
+
+`expert add` appends to `repos.txt` in your projects folder. That file is the list: one
+git URL per line, editable in Notepad, and `expert sync` clones whatever is missing.
+Then `expert refresh <name>` studies a project, and Claude Desktop can answer about it.
 
 [SETUP.md](SETUP.md) is the full walkthrough, including troubleshooting.
 [ARCHITECTURE.md](ARCHITECTURE.md) explains how it works internally, for anyone changing the code.
@@ -23,9 +32,10 @@ serves those docs *plus* live ripgrep search and file reads over the real code, 
 questions are answered from the source rather than the summary. Every doc is stamped
 with the commit it was written at, and anything stale is flagged in the answer.
 
-`expert sync` can mirror repos from a GitHub account, but that is a convenience — the
-folder is the source of truth, and copying or cloning projects in yourself works
-identically.
+`expert sync` clones whatever `repos.txt` lists, and can additionally mirror an entire
+GitHub account if you set `githubUser`. Both are conveniences — the folder is the source
+of truth, and copying or cloning projects in yourself works identically. Listed projects
+are updated with a fast-forward pull, so a repo you also work in never loses commits.
 
 ## What you need
 
@@ -51,10 +61,11 @@ To hack on the tool itself:
 ## Use
 
     expert init                # first run: write config, connect to Claude Desktop
+    expert add <url>…          # add projects to repos.txt and clone them
     expert status              # what was found, and what has been studied
     expert refresh <name>…     # study specific repos (adds them if never studied)
     expert refresh             # update everything, re-study what changed, then the portfolio
-    expert sync                # pull repos from GitHub (optional)
+    expert sync                # clone/update everything in repos.txt (and GitHub, if configured)
     expert curate --stale      # study everything not yet studied — slow, uses the model
     expert curate --portfolio  # redo just the cross-repo map
 

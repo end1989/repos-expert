@@ -20,6 +20,7 @@ export async function makeFixture(): Promise<{ cfg: ExpertConfig; client: Client
   const cfg: ExpertConfig = {
     githubUser: 'u',
     reposDir: path.join(root, 'repos'),
+    reposListFile: path.join(root, 'repos', 'repos.txt'),
     knowledgeDir: path.join(root, 'knowledge'),
     model: 'claude-sonnet-5',
     excludeRepos: [],

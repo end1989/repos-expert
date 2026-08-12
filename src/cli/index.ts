@@ -1,9 +1,13 @@
 #!/usr/bin/env node
 import { createRequire } from 'node:module';
+import path from 'node:path';
+import readline from 'node:readline/promises';
 import { fileURLToPath } from 'node:url';
 import { Command } from 'commander';
-import { loadConfig, userConfigPath } from '../config.js';
-import { claudeDesktopConfigPath, runInit } from './init.js';
+import { findConfigPath, loadConfig, userConfigPath } from '../config.js';
+import { addToReposList, readReposList } from '../repos-list.js';
+import { helpText, type HelpState } from './help.js';
+import { claudeDesktopConfigPath, runInit, suggestReposDir } from './init.js';
 import { syncRepos } from './sync.js';
 import { formatStatus } from './status.js';
 import { listRepoStatuses, getRepoStatus } from '../registry.js';
@@ -27,13 +31,30 @@ program
   .option('--force', 'overwrite an existing config')
   .option('--skip-client', 'do not touch the Claude Desktop config')
   .option('--skip-workspace-guide', 'do not write CLAUDE.md into your repos folder')
-  .action((opts: {
+  .option('-y, --yes', 'accept the default repos folder without asking')
+  .action(async (opts: {
     reposDir?: string;
     githubUser?: string;
     force?: boolean;
     skipClient?: boolean;
     skipWorkspaceGuide?: boolean;
+    yes?: boolean;
   }) => {
+    // Guessing the folder is what leaves people staring at an empty one, so ask
+    // whenever there is someone there to answer.
+    const suggestion = suggestReposDir();
+    if (opts.reposDir === undefined && opts.yes !== true && process.stdin.isTTY === true) {
+      const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+      try {
+        const answer = (await rl.question(`Where are your projects? [${suggestion}] `)).trim();
+        opts.reposDir = answer.length > 0 ? answer : suggestion;
+      } finally {
+        rl.close();
+      }
+    } else if (opts.reposDir === undefined) {
+      opts.reposDir = suggestion;
+    }
+
     const res = runInit(opts, {
       configPath: userConfigPath(),
       clientConfigPath: claudeDesktopConfigPath(),
@@ -42,13 +63,99 @@ program
     console.log(
       res.configWritten ? `Wrote config: ${res.configPath}` : `Config: ${res.configPath}`,
     );
+    console.log(`Projects folder: ${res.reposDir}`);
     if (res.clientWritten) console.log(`Connected to Claude Desktop: ${res.clientConfigPath}`);
     for (const note of res.notes) console.log(`  ${note}`);
-    console.log('\nNext:');
-    console.log('  1. Put project folders in the reposDir named above.');
-    console.log('  2. expert status                  # see what it found');
-    console.log('  3. expert refresh <project>       # study one, check the result');
-    console.log('  4. Restart Claude Desktop and ask "What projects do I have?"');
+
+    const listPath = res.reposListPath ?? path.join(res.reposDir, 'repos.txt');
+    console.log('\nNext — get your projects in the folder, either way works:');
+    console.log(`  a. Copy or clone project folders into ${res.reposDir}`);
+    console.log(`  b. Add their git URLs to ${listPath}, then run \`expert sync\``);
+    console.log(`     (or skip the editor: \`expert add <url>\` does both)`);
+    console.log('\nThen:');
+    console.log('  expert status                  # see what it found');
+    console.log('  expert refresh <project>       # study one, check the result');
+    console.log('  Restart Claude Desktop and ask "What projects do I have?"');
+    if (!res.configWritten) {
+      console.log(`\nWrong folder? Edit "reposDir" in ${res.configPath}, or re-run with`);
+      console.log(`  expert init --repos-dir "<path>" --force`);
+    }
+  });
+
+program
+  .command('add')
+  .description('Add git URLs to your project list and clone them')
+  .argument('<urls...>', 'git URLs, or "name = url" to choose the folder name')
+  .option('--no-sync', 'just add to the list, do not clone yet')
+  .action(async (urls: string[], opts: { sync?: boolean }) => {
+    const cfg = loadConfig();
+    const res = addToReposList(cfg.reposListFile, urls);
+    for (const problem of res.problems) console.error(`  ${problem}`);
+    for (const name of res.alreadyListed) console.log(`  already listed: ${name}`);
+    for (const entry of res.added) console.log(`  added: ${entry.name} <- ${entry.url}`);
+    if (res.added.length > 0) console.log(`Updated ${cfg.reposListFile}`);
+    if (res.problems.length > 0) process.exitCode = 1;
+
+    if (opts.sync !== false && res.added.length > 0) {
+      const sync = await syncRepos(cfg, undefined, res.added.map((e) => e.name));
+      console.log(`cloned ${sync.synced.length}, failed ${sync.failed.length}`);
+      for (const f of sync.failed) console.error(`  FAILED ${f.name}: ${f.error}`);
+      if (sync.failed.length > 0) process.exitCode = 1;
+      else if (sync.synced.length > 0) {
+        console.log(`Next: expert refresh ${sync.synced.join(' ')}`);
+      }
+    }
+  });
+
+/** Never throws: help is what you reach for when things are broken. */
+async function currentHelpState(): Promise<HelpState> {
+  const state: HelpState = {
+    version,
+    configPath: null,
+    reposDir: null,
+    reposListFile: null,
+    listedCount: 0,
+    repoCount: 0,
+    curatedCount: 0,
+    githubUser: null,
+  };
+  let cfg;
+  try {
+    cfg = loadConfig();
+  } catch {
+    return state;
+  }
+  state.configPath = findConfigPath() ?? userConfigPath();
+  state.reposDir = cfg.reposDir;
+  state.reposListFile = cfg.reposListFile;
+  state.githubUser = cfg.githubUser;
+  try {
+    state.listedCount = readReposList(cfg.reposListFile).entries.length;
+  } catch { /* an unreadable list should not take the help text down */ }
+  try {
+    const statuses = await listRepoStatuses(cfg);
+    state.repoCount = statuses.length;
+    state.curatedCount = statuses.filter((s) => s.state !== 'uncurated').length;
+  } catch { /* likewise a missing folder */ }
+  return state;
+}
+
+program
+  .command('help', { isDefault: true })
+  .description('Where your files are, what state you are in, and what to run next')
+  .argument('[command]', 'show the options for one command instead')
+  .action(async (name?: string) => {
+    if (name !== undefined) {
+      const cmd = program.commands.find((c) => c.name() === name);
+      if (cmd === undefined) {
+        console.error(`No such command: ${name}`);
+        process.exitCode = 1;
+        return;
+      }
+      cmd.outputHelp();
+      return;
+    }
+    console.log(helpText(await currentHelpState()));
   });
 
 program
@@ -67,7 +174,7 @@ program
   .description('Show what was found in your repos folder and what has been studied')
   .action(async () => {
     const cfg = loadConfig();
-    console.log(formatStatus(await listRepoStatuses(cfg)));
+    console.log(formatStatus(await listRepoStatuses(cfg), cfg));
   });
 
 program

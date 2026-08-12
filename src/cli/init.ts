@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { userConfigPath } from '../config.js';
+import { REPOS_LIST_FILENAME, reposListTemplate } from '../repos-list.js';
 
 export const PACKAGE_NAME = 'repos-expert';
 
@@ -16,6 +17,8 @@ export interface InitOptions {
 export interface InitResult {
   configPath: string;
   configWritten: boolean;
+  reposDir: string;
+  reposListPath: string | null;
   clientConfigPath: string | null;
   clientWritten: boolean;
   notes: string[];
@@ -131,26 +134,101 @@ document.
 implemented" section lists things a README claims that the code does not do. Respect that
 line when quoting it.
 
-## Keeping it current
+## Adding and keeping projects
+
+\`${REPOS_LIST_FILENAME}\` in this folder is the list of projects to clone — one git URL per
+line, then \`expert sync\`. Any folder already here containing a \`.git\` is picked up without
+being listed.
 
 \`expert refresh\` re-studies whatever changed. \`expert refresh <repo>\` adds or updates one.
 `;
+}
+
+/** Where projects go if the user did not say. */
+export function defaultReposDir(): string {
+  return path.join(os.homedir(), 'repos');
+}
+
+/** Folders people actually keep code in, best guess first. */
+export function reposDirCandidates(home = os.homedir()): string[] {
+  const named = ['repos', 'code', 'dev', 'src', 'projects', 'source/repos', 'Documents/GitHub'];
+  const roots = [...named.map((n) => path.join(home, ...n.split('/')))];
+  if (process.platform === 'win32') {
+    roots.push('C:\\dev\\repos', 'C:\\dev', 'C:\\code', 'C:\\src');
+  }
+  return roots;
+}
+
+function holdsGitRepos(dir: string): boolean {
+  try {
+    return fs
+      .readdirSync(dir, { withFileTypes: true })
+      .some((e) => e.isDirectory() && fs.existsSync(path.join(dir, e.name, '.git')));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A default worth offering. Suggesting an empty folder is what leaves someone
+ * looking at a directory with nothing in it, wondering what went wrong.
+ */
+export function suggestReposDir(candidates = reposDirCandidates()): string {
+  return candidates.find((c) => holdsGitRepos(c)) ?? candidates[0] ?? defaultReposDir();
+}
+
+/** reposDir from a config already on disk, resolved the same way loadConfig resolves it. */
+function configuredReposDir(configPath: string): string | null {
+  try {
+    const raw = JSON.parse(fs.readFileSync(configPath, 'utf8')) as { reposDir?: unknown };
+    if (typeof raw.reposDir !== 'string' || raw.reposDir.length === 0) return null;
+    return path.resolve(path.dirname(configPath), raw.reposDir);
+  } catch {
+    return null;
+  }
 }
 
 export function runInit(opts: InitOptions, paths: InitPaths): InitResult {
   const notes: string[] = [];
   let configWritten = false;
 
+  let reposDir = opts.reposDir ?? defaultReposDir();
+
   if (fs.existsSync(paths.configPath) && opts.force !== true) {
     notes.push(`Config already exists, left alone: ${paths.configPath}`);
+    // Report — and set up — the folder the tool will really read, not the one asked
+    // for. Otherwise init cheerfully describes a folder nothing ever looks in.
+    const configured = configuredReposDir(paths.configPath);
+    if (configured !== null) {
+      if (opts.reposDir !== undefined && path.resolve(opts.reposDir) !== configured) {
+        notes.push(`It points at ${configured} — re-run with --force to change that.`);
+      }
+      reposDir = configured;
+    }
   } else {
     fs.mkdirSync(path.dirname(paths.configPath), { recursive: true });
     fs.writeFileSync(paths.configPath, defaultConfigBody(opts));
     configWritten = true;
   }
+  let reposListPath: string | null = null;
+
+  // The list is the answer to "I have an empty folder, now what?" — so it is written
+  // even when the workspace guide is skipped, and it is never silently replaced.
+  const listPath = path.join(reposDir, REPOS_LIST_FILENAME);
+  try {
+    fs.mkdirSync(reposDir, { recursive: true });
+    if (fs.existsSync(listPath)) {
+      notes.push(`Your project list is already there: ${listPath}`);
+    } else {
+      fs.writeFileSync(listPath, reposListTemplate());
+      notes.push(`Wrote your project list: ${listPath} — put git URLs in it, one per line.`);
+    }
+    reposListPath = listPath;
+  } catch (err) {
+    notes.push(`Could not write ${listPath}: ${err instanceof Error ? err.message : String(err)}`);
+  }
 
   if (opts.skipWorkspaceGuide !== true) {
-    const reposDir = opts.reposDir ?? path.join(os.homedir(), 'repos');
     const guidePath = path.join(reposDir, 'CLAUDE.md');
     if (fs.existsSync(guidePath)) {
       notes.push(`Left your existing ${guidePath} alone.`);
@@ -192,6 +270,8 @@ export function runInit(opts: InitOptions, paths: InitPaths): InitResult {
   return {
     configPath: paths.configPath,
     configWritten,
+    reposDir,
+    reposListPath,
     clientConfigPath: paths.clientConfigPath,
     clientWritten,
     notes,

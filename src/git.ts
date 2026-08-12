@@ -52,6 +52,15 @@ export async function updateMirror(dir: string, defaultBranch: string): Promise<
   await run('git', ['reset', '--hard', `origin/${defaultBranch}`], { ...OPTS, cwd: dir });
 }
 
+/**
+ * Update a repo the user may also be working in. Fast-forward only: if their branch
+ * has diverged, git refuses and we report it, rather than throwing away their commits
+ * the way `updateMirror` deliberately does.
+ */
+export async function pullFastForward(dir: string): Promise<void> {
+  await run('git', ['pull', '--ff-only'], { ...OPTS, cwd: dir });
+}
+
 export async function revParseHead(dir: string): Promise<string> {
   const { stdout } = await run('git', ['rev-parse', 'HEAD'], { ...OPTS, cwd: dir });
   return stdout.trim();

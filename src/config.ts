@@ -2,11 +2,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { REPOS_LIST_FILENAME } from './repos-list.js';
 
 export interface ExpertConfig {
   /** Only needed to pull repos from GitHub; null means "work with whatever is in reposDir". */
   githubUser: string | null;
   reposDir: string;
+  /** Editable list of git URLs to clone. Defaults to repos.txt inside reposDir. */
+  reposListFile: string;
   knowledgeDir: string;
   model: string;
   excludeRepos: string[];
@@ -68,14 +71,23 @@ export function userConfigPath(): string {
   return path.join(os.homedir(), '.config', 'repos-expert', 'expert.config.json');
 }
 
-function resolveDefaultConfigPath(): string {
+function configCandidates(): string[] {
   const fromEnv = process.env.EXPERT_CONFIG;
-  const candidates = [
+  return [
     ...(fromEnv !== undefined && fromEnv.length > 0 ? [path.resolve(fromEnv)] : []),
     path.resolve('expert.config.json'),
     userConfigPath(),
     packageRootConfigPath(),
   ];
+}
+
+/** The config that would be loaded, or null if there is none. Never throws. */
+export function findConfigPath(): string | null {
+  return configCandidates().find((c) => fs.existsSync(c)) ?? null;
+}
+
+function resolveDefaultConfigPath(): string {
+  const candidates = configCandidates();
   const found = candidates.find((c) => fs.existsSync(c));
   if (found !== undefined) return found;
   throw new Error(
@@ -105,9 +117,14 @@ export function loadConfig(configPath?: string): ExpertConfig {
     );
   }
   const base = path.dirname(resolvedPath);
+  const reposDir = path.resolve(base, merged.reposDir);
   return {
     githubUser,
-    reposDir: path.resolve(base, merged.reposDir),
+    reposDir,
+    reposListFile:
+      typeof raw.reposListFile === 'string' && raw.reposListFile.length > 0
+        ? path.resolve(base, raw.reposListFile)
+        : path.join(reposDir, REPOS_LIST_FILENAME),
     knowledgeDir: path.resolve(base, merged.knowledgeDir),
     model: merged.model,
     excludeRepos: merged.excludeRepos,

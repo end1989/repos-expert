@@ -25,6 +25,17 @@ describe('loadConfig', () => {
     expect(cfg.curateTimeoutMinutes).toBe(25);
   });
 
+  it('defaults the repos list to a file inside the repos folder, where people will find it', () => {
+    const p = writeConfig({ reposDir: './code' });
+    const cfg = loadConfig(p);
+    expect(cfg.reposListFile).toBe(path.join(cfg.reposDir, 'repos.txt'));
+  });
+
+  it('honors an explicit reposListFile, resolved like every other path', () => {
+    const p = writeConfig({ reposListFile: './my-services.txt' });
+    expect(loadConfig(p).reposListFile).toBe(path.resolve(path.dirname(p), './my-services.txt'));
+  });
+
   it('honors explicit values', () => {
     const p = writeConfig({
       githubUser: 'x',

@@ -7,6 +7,7 @@ import {
   mcpLaunchCommand,
   mergeClientConfig,
   runInit,
+  suggestReposDir,
 } from '../src/cli/init.js';
 import { makeTempDir } from './helpers.js';
 
@@ -64,6 +65,24 @@ describe('defaultConfigBody', () => {
   });
 });
 
+describe('suggestReposDir', () => {
+  it('prefers a folder that already has git repos in it', () => {
+    const root = makeTempDir('expert-suggest-');
+    const empty = path.join(root, 'repos');
+    const real = path.join(root, 'dev', 'repos');
+    fs.mkdirSync(empty, { recursive: true });
+    fs.mkdirSync(path.join(real, 'a-project', '.git'), { recursive: true });
+
+    expect(suggestReposDir([empty, real])).toBe(real);
+  });
+
+  it('falls back to the first candidate when nothing has repos yet', () => {
+    const root = makeTempDir('expert-suggest-');
+    const first = path.join(root, 'repos');
+    expect(suggestReposDir([first, path.join(root, 'other')])).toBe(first);
+  });
+});
+
 describe('runInit', () => {
   it('writes both files and backs up an existing client config', () => {
     const root = makeTempDir('expert-init-');
@@ -102,6 +121,49 @@ describe('runInit', () => {
     );
     expect(fs.readFileSync(path.join(reposDir, 'CLAUDE.md'), 'utf8')).toBe('MY OWN NOTES');
     expect(second.notes.join(' ')).toMatch(/Left your existing/);
+  });
+
+  it('creates the repos list so there is somewhere obvious to put project URLs', () => {
+    const root = makeTempDir('expert-init-');
+    const reposDir = path.join(root, 'code');
+    const res = runInit(
+      { reposDir, skipClient: true },
+      { configPath: path.join(root, 'expert.config.json'), clientConfigPath: null, entryPoint: 'x' },
+    );
+
+    const listPath = path.join(reposDir, 'repos.txt');
+    expect(res.reposListPath).toBe(listPath);
+    expect(fs.readFileSync(listPath, 'utf8')).toMatch(/expert sync/);
+    expect(res.notes.join(' ')).toContain(listPath);
+  });
+
+  it('leaves a repos list that already has projects in it alone', () => {
+    const root = makeTempDir('expert-init-');
+    const reposDir = path.join(root, 'code');
+    const configPath = path.join(root, 'expert.config.json');
+    const listPath = path.join(reposDir, 'repos.txt');
+    fs.mkdirSync(reposDir, { recursive: true });
+    fs.writeFileSync(listPath, 'https://github.com/acme/mine.git\n');
+
+    runInit({ reposDir, skipClient: true, force: true }, { configPath, clientConfigPath: null, entryPoint: 'x' });
+    expect(fs.readFileSync(listPath, 'utf8')).toBe('https://github.com/acme/mine.git\n');
+  });
+
+  it('reports the folder the existing config actually uses, not the one you asked for', () => {
+    const root = makeTempDir('expert-init-');
+    const configPath = path.join(root, 'expert.config.json');
+    const inUse = path.join(root, 'already-configured');
+    fs.writeFileSync(configPath, JSON.stringify({ reposDir: inUse }));
+
+    const res = runInit(
+      { reposDir: path.join(root, 'asked-for'), skipClient: true },
+      { configPath, clientConfigPath: null, entryPoint: 'x' },
+    );
+
+    expect(res.reposDir).toBe(inUse);
+    expect(fs.existsSync(path.join(inUse, 'repos.txt'))).toBe(true);
+    expect(fs.existsSync(path.join(root, 'asked-for'))).toBe(false);
+    expect(res.notes.join(' ')).toMatch(/--force/);
   });
 
   it('never overwrites an existing config unless forced', () => {

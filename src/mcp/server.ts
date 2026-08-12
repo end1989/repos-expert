@@ -68,9 +68,10 @@ export function noReposHint(cfg: ExpertConfig): string {
       : `The repos folder does not exist yet: ${cfg.reposDir}.`,
     'Put repo folders there (clone or copy them in) and they are analyzable immediately —',
     'code search and file reading need nothing else. Run `expert curate --stale` to add written docs.',
+    `To have them cloned instead, list git URLs in ${cfg.reposListFile} and run \`expert sync\`.`,
     cfg.githubUser === null
-      ? 'GitHub is not configured, and is not required.'
-      : `Or run \`expert sync\` to pull them from the GitHub account "${cfg.githubUser}".`,
+      ? 'A GitHub account is not configured, and is not required.'
+      : `\`expert sync\` also pulls everything from the GitHub account "${cfg.githubUser}".`,
   ].join('\n');
 }
 
