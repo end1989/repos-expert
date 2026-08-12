@@ -44,7 +44,10 @@ are updated with a fast-forward pull, so a repo you also work in never loses com
 - **An MCP client** to ask questions from: Claude Desktop, Claude Code, or VS Code with
   GitHub Copilot. Any MCP-aware client works; this is a standard stdio MCP server.
 - **Claude Code signed in, or `ANTHROPIC_API_KEY`** — only for the doc-writing step.
-  Searching, reading, and serving need no model access at all.
+  Searching, reading, and serving need no model access at all. The writing step can also
+  run against a local model or any Anthropic-compatible endpoint: set
+  `curatorEnv.ANTHROPIC_BASE_URL` in the config. `expert doctor` reports which provider
+  is actually in force, so "am I spending a subscription or per-token?" has an answer.
 - **`git` and the GitHub CLI** — optional, only for pulling repos from GitHub. Without
   them the tool says so and carries on with whatever is in the folder.
 

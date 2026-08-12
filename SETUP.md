@@ -202,6 +202,46 @@ catches up next time it's available), and writes its output to
 
 ---
 
+## Which model writes the documents (and who pays)
+
+Serving needs no model at all — it is files and ripgrep. Only the *studying* step
+uses one, and it never gets credentials from this tool: it launches Claude Code, which
+authenticates itself. `expert doctor` tells you which of these is in force:
+
+| What it says | What it means |
+| --- | --- |
+| Claude Code sign-in | Your Claude subscription. Nothing billed per repo. |
+| ANTHROPIC_API_KEY | Billed per token, not from a subscription. |
+| custom endpoint … | A local model or proxy. Nothing billed to Anthropic. |
+| AWS Bedrock / Google Vertex | Billed by that cloud. |
+
+### Using a local model
+
+Run something that speaks the Anthropic message format in front of your local model —
+LiteLLM and claude-code-router both do — then put the endpoint in your config:
+
+```json
+{
+  "curatorEnv": {
+    "ANTHROPIC_BASE_URL": "http://localhost:4000",
+    "ANTHROPIC_AUTH_TOKEN": "local"
+  }
+}
+```
+
+Config rather than shell variables on purpose: the weekly scheduled refresh inherits
+neither your terminal nor its environment, so a `$env:` setting would silently fall back
+to your subscription at 3am. `expert doctor` prints `(via curatorEnv)` when the setting
+is coming from the file.
+
+**Read the first result before trusting the rest.** These documents are worth having
+because the curator reads code and refuses to repeat the README — that discipline is the
+whole product. Weaker models fail exactly there: they summarise the documentation they
+find and hand you a confident description of a feature that does not exist, which is
+worse than having no knowledge base at all. Study one repo you know well and check
+`interfaces.md`. If its "Documented but not implemented" section is empty on a project
+whose README you know overpromises, the model is not doing the job.
+
 ## When something doesn't work
 
 **Start here:**

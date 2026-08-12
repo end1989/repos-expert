@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import type { ExpertConfig } from '../config.js';
+import { curatorEnvFrom, type EnvLike } from '../provider.js';
 import { gitLogOneline, gitLogRangeStat, listBranches } from '../git.js';
 import {
   listRepoStatuses,
@@ -26,6 +27,8 @@ export interface RunOpts {
   cwd: string;
   model: string;
   timeoutMs: number;
+  /** Environment for the Claude Code subprocess — this is what selects the provider. */
+  env: EnvLike;
 }
 
 export type AgentRunner = (prompt: string, opts: RunOpts) => Promise<string>;
@@ -39,6 +42,7 @@ export const runClaudeAgent: AgentRunner = async (prompt, opts) => {
       options: {
         cwd: opts.cwd,
         model: opts.model,
+        env: opts.env,
         allowedTools: ['Read', 'Glob', 'Grep'],
         permissionMode: 'bypassPermissions',
         // Required by the installed SDK (sdk.d.ts) to actually apply
@@ -98,6 +102,7 @@ export async function curateRepo(
       cwd: status.path,
       model: cfg.model,
       timeoutMs: timeoutMsFor(cfg),
+      env: curatorEnvFrom(process.env, cfg.curatorEnv),
     });
     return parseCuratedDocs(output, DOC_FILES);
   });
@@ -146,6 +151,7 @@ export async function curatePortfolio(
       cwd: cfg.reposDir,
       model: cfg.model,
       timeoutMs: timeoutMsFor(cfg),
+      env: curatorEnvFrom(process.env, cfg.curatorEnv),
     });
     return parseCuratedDocs(output, ['portfolio.md', 'cross-repo-map.md']);
   });

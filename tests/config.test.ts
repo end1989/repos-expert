@@ -31,6 +31,25 @@ describe('loadConfig', () => {
     expect(cfg.reposListFile).toBe(path.join(cfg.reposDir, 'repos.txt'));
   });
 
+  it('defaults curatorEnv to empty — no environment meddling unless asked', () => {
+    expect(loadConfig(writeConfig({})).curatorEnv).toEqual({});
+  });
+
+  it('carries curatorEnv through, so a local endpoint survives into a scheduled run', () => {
+    const p = writeConfig({ curatorEnv: { ANTHROPIC_BASE_URL: 'http://localhost:4000' } });
+    expect(loadConfig(p).curatorEnv).toEqual({ ANTHROPIC_BASE_URL: 'http://localhost:4000' });
+  });
+
+  it('rejects a curatorEnv name that is not a valid variable', () => {
+    const p = writeConfig({ curatorEnv: { 'BAD NAME': 'x' } });
+    expect(() => loadConfig(p)).toThrow(/curatorEnv/);
+  });
+
+  it('rejects a non-string curatorEnv value rather than passing undefined to a subprocess', () => {
+    const p = writeConfig({ curatorEnv: { ANTHROPIC_BASE_URL: 4000 } });
+    expect(() => loadConfig(p)).toThrow(/curatorEnv/);
+  });
+
   it('honors an explicit reposListFile, resolved like every other path', () => {
     const p = writeConfig({ reposListFile: './my-services.txt' });
     expect(loadConfig(p).reposListFile).toBe(path.resolve(path.dirname(p), './my-services.txt'));

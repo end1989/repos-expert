@@ -9,7 +9,7 @@ function probes(over: Partial<Probes> = {}): Probes {
     nodeVersion: 'v22.0.0',
     ripgrepPath: 'C:/rg.exe',
     hasCommand: () => true,
-    hasApiKey: false,
+    env: {},
     ...over,
   };
 }
@@ -88,16 +88,49 @@ describe('runChecks', () => {
 
   it('warns when neither Claude Code nor an API key is available', () => {
     const root = makeTempDir('expert-doctor-');
-    const checks = runChecks(goodConfig(root), probes({ hasCommand: () => false, hasApiKey: false }));
+    const checks = runChecks(goodConfig(root), probes({ hasCommand: () => false }));
     const model = find(checks, 'model access');
     expect(model.status).toBe('warn');
     expect(model.detail).toMatch(/search/i);
   });
 
-  it('passes model access on an API key alone', () => {
+  it('passes model access on an API key alone, and says it is billed per token', () => {
     const root = makeTempDir('expert-doctor-');
-    const checks = runChecks(goodConfig(root), probes({ hasCommand: () => false, hasApiKey: true }));
-    expect(find(checks, 'model access').status).toBe('ok');
+    const checks = runChecks(
+      goodConfig(root),
+      probes({ hasCommand: () => false, env: { ANTHROPIC_API_KEY: 'sk-secret' } }),
+    );
+    const model = find(checks, 'model access');
+    expect(model.status).toBe('ok');
+    expect(model.detail).toMatch(/per.token/i);
+    expect(model.detail).not.toContain('sk-secret');
+  });
+
+  it('names the subscription when that is what would actually be spent', () => {
+    const root = makeTempDir('expert-doctor-');
+    expect(find(runChecks(goodConfig(root), probes()), 'model access').detail).toMatch(
+      /subscription/i,
+    );
+  });
+
+  it('reports a local endpoint configured in curatorEnv, and that it came from config', () => {
+    const root = makeTempDir('expert-doctor-');
+    const configPath = path.join(root, 'expert.config.json');
+    fs.mkdirSync(path.join(root, 'repos', 'a-project', '.git'), { recursive: true });
+    fs.writeFileSync(
+      configPath,
+      JSON.stringify({
+        reposDir: './repos',
+        curatorEnv: { ANTHROPIC_BASE_URL: 'http://localhost:4000' },
+      }),
+    );
+    const model = find(runChecks(configPath, probes()), 'model access');
+    expect(model.detail).toContain('http://localhost:4000');
+    expect(model.detail).toMatch(/curatorEnv/);
+  });
+
+  it('still reports model access when there is no config to read', () => {
+    expect(find(runChecks(null, probes()), 'model access').status).toBe('ok');
   });
 });
 

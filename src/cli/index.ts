@@ -203,7 +203,7 @@ program
       nodeVersion: process.version,
       ripgrepPath: fs.existsSync(rgPath) ? rgPath : null,
       hasCommand: onPath,
-      hasApiKey: (process.env.ANTHROPIC_API_KEY ?? '').length > 0,
+      env: process.env,
     });
     console.log(formatDiagnosis(checks));
     if (checks.some((c) => c.status === 'fail')) process.exitCode = 1;

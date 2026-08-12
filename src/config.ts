@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { REPOS_LIST_FILENAME } from './repos-list.js';
+import { isValidEnvKey } from './provider.js';
 
 export interface ExpertConfig {
   /** Only needed to pull repos from GitHub; null means "work with whatever is in reposDir". */
@@ -18,6 +19,12 @@ export interface ExpertConfig {
   curateConcurrency: number;
   /** How long one curator agent may run before it is aborted. */
   curateTimeoutMinutes: number;
+  /**
+   * Environment handed to the curator subprocess, layered over this process's own.
+   * Point `ANTHROPIC_BASE_URL` at a local proxy to curate with a local model. Config
+   * rather than shell variables, because a scheduled task inherits neither.
+   */
+  curatorEnv: Record<string, string>;
 }
 
 /** Upper bound on parallel curator agents — each one spawns a CLI subprocess. */
@@ -116,6 +123,22 @@ export function loadConfig(configPath?: string): ExpertConfig {
       `expert.config.json: "curateTimeoutMinutes" must be an integer between 1 and ${MAX_CURATE_TIMEOUT_MINUTES}`,
     );
   }
+  const curatorEnv: Record<string, string> = {};
+  if (raw.curatorEnv !== undefined && raw.curatorEnv !== null) {
+    if (typeof raw.curatorEnv !== 'object' || Array.isArray(raw.curatorEnv)) {
+      throw new Error('expert.config.json: "curatorEnv" must be an object of NAME: "value" pairs');
+    }
+    for (const [key, value] of Object.entries(raw.curatorEnv as Record<string, unknown>)) {
+      if (!isValidEnvKey(key)) {
+        throw new Error(`expert.config.json: "curatorEnv" name ${JSON.stringify(key)} is not a valid environment variable`);
+      }
+      if (typeof value !== 'string') {
+        throw new Error(`expert.config.json: "curatorEnv" value for ${key} must be a string`);
+      }
+      curatorEnv[key] = value;
+    }
+  }
+
   const base = path.dirname(resolvedPath);
   const reposDir = path.resolve(base, merged.reposDir);
   return {
@@ -131,5 +154,6 @@ export function loadConfig(configPath?: string): ExpertConfig {
     includeArchived: Boolean(merged.includeArchived),
     curateConcurrency: merged.curateConcurrency,
     curateTimeoutMinutes: merged.curateTimeoutMinutes,
+    curatorEnv,
   };
 }

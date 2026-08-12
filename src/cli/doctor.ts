@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { loadConfig } from '../config.js';
+import { loadConfig, type ExpertConfig } from '../config.js';
+import { curatorEnvFrom, describeProvider, type EnvLike } from '../provider.js';
 import { readReposList } from '../repos-list.js';
 
 export type CheckStatus = 'ok' | 'warn' | 'fail';
@@ -19,7 +20,8 @@ export interface Probes {
   /** Path to the bundled ripgrep, or null if the binary never got installed. */
   ripgrepPath: string | null;
   hasCommand(cmd: string): boolean;
-  hasApiKey: boolean;
+  /** This process's environment; config's curatorEnv is layered on top. */
+  env: EnvLike;
 }
 
 const MIN_NODE_MAJOR = 20;
@@ -62,6 +64,30 @@ function canWrite(dir: string): boolean {
 }
 
 /**
+ * Which model would write the documents, and who pays. `curatorEnv` is included
+ * because that is exactly the setting a scheduled run relies on and a shell session
+ * would otherwise hide.
+ */
+function modelAccessCheck(probes: Probes, cfg: ExpertConfig | undefined): Check {
+  const env = curatorEnvFrom(probes.env, cfg?.curatorEnv);
+  const provider = describeProvider(env, { hasClaudeCode: probes.hasCommand('claude') });
+  if (provider.kind === 'none') {
+    return {
+      name: 'model access',
+      status: 'warn',
+      detail: `${provider.detail} — search and file reading still work without it`,
+      fix: 'Install Claude Code and sign in, set ANTHROPIC_API_KEY, or point curatorEnv.ANTHROPIC_BASE_URL at a local model',
+    };
+  }
+  const viaConfig = cfg !== undefined && Object.keys(cfg.curatorEnv).length > 0;
+  return {
+    name: 'model access',
+    status: 'ok',
+    detail: `${provider.detail}${viaConfig ? ' (via curatorEnv)' : ''}`,
+  };
+}
+
+/**
  * Checks are ordered by what blocks what: an unusable Node makes everything else
  * moot, and there is no point reporting on repos when the config that names them
  * could not be read.
@@ -92,24 +118,8 @@ export function runChecks(configPath: string | null, probes: Probes): Check[] {
         },
   );
 
-  const claude = probes.hasCommand('claude');
-  checks.push(
-    claude || probes.hasApiKey
-      ? {
-          name: 'model access',
-          status: 'ok',
-          detail: claude ? 'Claude Code is on PATH' : 'ANTHROPIC_API_KEY is set',
-        }
-      : {
-          name: 'model access',
-          status: 'warn',
-          detail:
-            'no Claude Code and no ANTHROPIC_API_KEY — studying repos will fail, but search and file reading still work',
-          fix: 'Install Claude Code and sign in, or set ANTHROPIC_API_KEY',
-        },
-  );
-
   if (configPath === null) {
+    checks.push(modelAccessCheck(probes, undefined));
     checks.push({
       name: 'config',
       status: 'fail',
@@ -129,9 +139,11 @@ export function runChecks(configPath: string | null, probes: Probes): Check[] {
       detail: `${configPath} — ${err instanceof Error ? err.message : String(err)}`,
       fix: 'Fix the file by hand, or start over with: expert init --force',
     });
+    checks.push(modelAccessCheck(probes, undefined));
     return checks;
   }
   checks.push({ name: 'config', status: 'ok', detail: configPath });
+  checks.push(modelAccessCheck(probes, cfg));
 
   const reposExists = fs.existsSync(cfg.reposDir);
   checks.push(

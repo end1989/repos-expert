@@ -92,6 +92,13 @@ cannot launch the process shows a red light and a log nobody reads; a server tha
 ask above ten repos when a human is at the terminal, and `--dry-run` answers "how big is
 this?" without starting it — the one question you must not have to answer by experiment.
 
+**The curator passes no credentials.** It spawns Claude Code, which authenticates from
+its own environment. That indirection is why the same command runs against a
+subscription, an API key, Bedrock/Vertex, or a local model behind a proxy — and why
+`src/provider.ts` exists to name which one, since otherwise the choice is invisible and
+"what am I spending?" has no answer. `curatorEnv` lives in config rather than the shell
+because a scheduled task inherits neither.
+
 **Caps exist because the client has a context window**: 100 search matches, 2,000 lines or
 200 KB per file read. They are not performance tuning — removing them will flood the
 conversation.
@@ -120,3 +127,4 @@ re-curating to gain it.
 `requireRepo` — that is what enforces the name whitelist and produces the staleness banner.
 
 **A different model:** `model` in the config is passed straight through to the Agent SDK.
+A different *provider* — local, Bedrock, Vertex, an API key — is `curatorEnv`.
