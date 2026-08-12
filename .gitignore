@@ -6,3 +6,6 @@ dist/
 # Personal: names your GitHub account and your own folders.
 # Copy expert.config.example.json to expert.config.json and edit that.
 /expert.config.json
+
+# npm pack output — build artifact, never source
+*.tgz

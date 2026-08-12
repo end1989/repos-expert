@@ -15,7 +15,6 @@ describe('formatStatus', () => {
   it('renders one line per repo with state, head, and curated sha', () => {
     const out = formatStatus([status('alpha', 'fresh'), status('beta', 'uncurated')]);
     const lines = out.split('\n');
-    expect(lines).toHaveLength(2);
     expect(lines[0]).toContain('fresh');
     expect(lines[0]).toContain('alpha');
     expect(lines[0]).toContain('abcdef1');
@@ -25,5 +24,20 @@ describe('formatStatus', () => {
 
   it('tells the user to sync when there are no repos', () => {
     expect(formatStatus([])).toContain('expert sync');
+  });
+
+  it('names an uncurated repo to study, since a list of "uncurated" is not a next step', () => {
+    const out = formatStatus([status('alpha', 'uncurated'), status('beta', 'uncurated')]);
+    expect(out).toContain('expert refresh alpha');
+  });
+
+  it('says nothing extra once everything is studied', () => {
+    const out = formatStatus([status('alpha', 'fresh')]);
+    expect(out.split('\n')).toHaveLength(1);
+  });
+
+  it('points at refresh when docs have fallen behind the code', () => {
+    const out = formatStatus([status('alpha', 'fresh'), status('beta', 'stale')]);
+    expect(out).toMatch(/expert refresh\b/);
   });
 });
