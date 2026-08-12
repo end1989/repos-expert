@@ -131,6 +131,59 @@ Use the documents to orient and to answer conceptual and cross-repo questions. T
 - If the documents and the code disagree, the code wins. Say so plainly to the user, and
   mention that re-running \`expert refresh <repo>\` will bring the documents back in line.`;
 
+/**
+ * What every tool says when there is no usable config. An MCP client that cannot
+ * start a server shows a red light and a stack trace in a log nobody opens; a server
+ * that starts and explains itself is repairable by the person holding the chat window.
+ */
+export function setupInstructions(reason: string): string {
+  return [
+    'repos-expert is installed but not set up yet, so there is nothing to search.',
+    '',
+    `Reason: ${reason}`,
+    '',
+    'To fix it, in a terminal:',
+    '  expert init          # asks where your projects are, writes the config',
+    '  expert add <url>     # add a project (or copy folders into that directory)',
+    '  expert refresh <name>  # study one, so there is something to answer from',
+    '',
+    'Tell the user this — they have to run it; you cannot. Nothing else here will work',
+    'until they do, so do not retry these tools in the meantime.',
+  ].join('\n');
+}
+
+/**
+ * A server that answers honestly instead of failing to start. Deliberately exposes
+ * the same tool names as the real one so the client's tool list does not change shape
+ * between "set up" and "not set up".
+ */
+export function createUnconfiguredServer(reason: string): McpServer {
+  const server = new McpServer(
+    { name: 'repos-expert', version: SERVER_VERSION },
+    { instructions: setupInstructions(reason) },
+  );
+  const message = setupInstructions(reason);
+  for (const name of TOOL_NAMES) {
+    server.registerTool(
+      name,
+      { description: 'Unavailable until repos-expert is set up — call it to see how.', inputSchema: {} },
+      async () => text(message),
+    );
+  }
+  return server;
+}
+
+/** Every tool this server exposes; the unconfigured server mirrors the list. */
+const TOOL_NAMES = [
+  'portfolio_overview',
+  'list_repos',
+  'get_repo_knowledge',
+  'search_knowledge',
+  'search_code',
+  'find_files',
+  'read_repo_file',
+] as const;
+
 export function createServer(cfg: ExpertConfig): McpServer {
   const server = new McpServer(
     { name: 'repos-expert', version: SERVER_VERSION },
@@ -269,5 +322,23 @@ export function createServer(cfg: ExpertConfig): McpServer {
 
 export async function startMcp(cfg: ExpertConfig): Promise<void> {
   const server = createServer(cfg);
+  await server.connect(new StdioServerTransport());
+}
+
+/**
+ * The entry point an MCP client actually launches. Loading the config is allowed to
+ * fail: a client cannot act on a process that exited, but it can relay a sentence
+ * telling the user which command to run.
+ */
+export async function startMcpOrExplain(loadCfg: () => ExpertConfig): Promise<void> {
+  let server: McpServer;
+  try {
+    server = createServer(loadCfg());
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    // stderr only — stdout is the protocol.
+    console.error(`repos-expert: starting in setup mode. ${reason}`);
+    server = createUnconfiguredServer(reason);
+  }
   await server.connect(new StdioServerTransport());
 }

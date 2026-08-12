@@ -1,6 +1,6 @@
 {
   "name": "repos-expert",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Answers questions about a folder of code repositories — studies each one, writes a knowledge base, and serves it over MCP.",
   "license": "MIT",
   "type": "module",

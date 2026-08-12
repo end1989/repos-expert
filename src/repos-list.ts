@@ -30,6 +30,14 @@ function isSupportedUrl(url: string): boolean {
   return SCHEME.test(url) || SCP_FORM.test(url);
 }
 
+/** `owner/repo` is what GitHub's own UI shows, and what people paste. */
+const GITHUB_SHORTHAND = /^([A-Za-z0-9][A-Za-z0-9._-]*)\/([A-Za-z0-9][A-Za-z0-9._-]*)$/;
+
+export function expandShorthand(value: string): string {
+  const m = GITHUB_SHORTHAND.exec(value);
+  return m === null ? value : `https://github.com/${m[1]}/${m[2]!.replace(/\.git$/i, '')}.git`;
+}
+
 /**
  * The folder name a clone would land in. Null when the URL has no usable path
  * segment, or when the segment is not a plain name — that check is what keeps a
@@ -75,13 +83,13 @@ export function parseReposList(text: string): ParsedReposList {
     const named = /^([^=\s]+)\s*=\s*(.+)$/.exec(line);
     if (named !== null) {
       name = named[1]!;
-      url = named[2]!.trim();
+      url = expandShorthand(named[2]!.trim());
       if (!VALID_NAME.test(name) || name === '.' || name === '..') {
         problems.push(`line ${lineNo}: "${name}" is not a usable folder name (letters, digits, . _ - only)`);
         return;
       }
     } else {
-      url = line;
+      url = expandShorthand(line);
       name = repoNameFromUrl(url);
     }
 
@@ -158,6 +166,7 @@ export function reposListTemplate(): string {
 #
 #   https://github.com/acme/billing-api.git
 #   git@github.com:acme/checkout-service.git
+#   acme/billing-api                    <- GitHub shorthand, same thing
 #
 # To use a shorter folder name than the URL implies, put the name first:
 #

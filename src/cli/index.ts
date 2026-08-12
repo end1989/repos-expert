@@ -1,9 +1,19 @@
 #!/usr/bin/env node
+import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import readline from 'node:readline/promises';
 import { fileURLToPath } from 'node:url';
 import { Command } from 'commander';
+import { rgPath } from '@vscode/ripgrep';
+import { formatDiagnosis, runChecks } from './doctor.js';
+import {
+  estimateBatch,
+  formatDryRun,
+  formatEstimate,
+  needsConfirmation,
+} from './estimate.js';
 import { findConfigPath, loadConfig, userConfigPath } from '../config.js';
 import { addToReposList, readReposList } from '../repos-list.js';
 import { helpText, type HelpState } from './help.js';
@@ -11,7 +21,7 @@ import { claudeDesktopConfigPath, runInit, suggestReposDir } from './init.js';
 import { syncRepos } from './sync.js';
 import { formatStatus } from './status.js';
 import { listRepoStatuses, getRepoStatus } from '../registry.js';
-import { startMcp } from '../mcp/server.js';
+import { startMcpOrExplain } from '../mcp/server.js';
 import { curateRepo, curatePortfolio } from '../curator/curator.js';
 import { curateMany, parseConcurrency } from './curate-many.js';
 import { runRefresh } from './refresh.js';
@@ -107,6 +117,22 @@ program
     }
   });
 
+/**
+ * Is a command installed? Looked up rather than executed — running `claude --version`
+ * would need a shell on Windows, where it is a .cmd shim, and this file does not get
+ * to be the one place that opens a shell.
+ */
+function onPath(cmd: string): boolean {
+  if (!/^[A-Za-z0-9._-]+$/.test(cmd)) return false;
+  const finder = process.platform === 'win32' ? 'where' : 'which';
+  try {
+    execFileSync(finder, [cmd], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Never throws: help is what you reach for when things are broken. */
 async function currentHelpState(): Promise<HelpState> {
   const state: HelpState = {
@@ -170,6 +196,20 @@ program
   });
 
 program
+  .command('doctor')
+  .description('Check the setup and say what to fix — run this when something is not working')
+  .action(() => {
+    const checks = runChecks(findConfigPath(), {
+      nodeVersion: process.version,
+      ripgrepPath: fs.existsSync(rgPath) ? rgPath : null,
+      hasCommand: onPath,
+      hasApiKey: (process.env.ANTHROPIC_API_KEY ?? '').length > 0,
+    });
+    console.log(formatDiagnosis(checks));
+    if (checks.some((c) => c.status === 'fail')) process.exitCode = 1;
+  });
+
+program
   .command('status')
   .description('Show what was found in your repos folder and what has been studied')
   .action(async () => {
@@ -181,8 +221,7 @@ program
   .command('mcp')
   .description('Start the MCP server on stdio (for Claude Desktop, Claude Code, Copilot, or any MCP client)')
   .action(async () => {
-    const cfg = loadConfig();
-    await startMcp(cfg);
+    await startMcpOrExplain(() => loadConfig());
   });
 
 interface CurateOptions {
@@ -190,6 +229,8 @@ interface CurateOptions {
   stale?: boolean;
   portfolio?: boolean;
   concurrency?: number;
+  yes?: boolean;
+  dryRun?: boolean;
 }
 
 program
@@ -204,6 +245,8 @@ program
     'repos to curate at once (default: config curateConcurrency)',
     parseConcurrency,
   )
+  .option('-y, --yes', 'do not ask before a long batch')
+  .option('--dry-run', 'show what would be studied, and what it would cost, without doing it')
   .action(async (repoArg: string | undefined, opts: CurateOptions) => {
     const cfg = loadConfig();
     let failures = 0;
@@ -215,8 +258,29 @@ program
       const statuses = await listRepoStatuses(cfg);
       const targets = opts.stale ? statuses.filter((s) => s.state !== 'fresh') : statuses;
       const concurrency = opts.concurrency ?? cfg.curateConcurrency;
-      if (targets.length === 0) console.log('Nothing to curate — everything is fresh.');
-      else console.log(`curating ${targets.length} repos, ${concurrency} at a time`);
+      if (opts.dryRun === true) {
+        console.log(
+          targets.length === 0
+            ? 'Nothing to curate — everything is fresh.'
+            : formatDryRun(targets.map((t) => t.name), estimateBatch(targets.length, concurrency)),
+        );
+        return;
+      }
+      if (targets.length === 0) {
+        console.log('Nothing to curate — everything is fresh.');
+      } else {
+        console.log(formatEstimate(estimateBatch(targets.length, concurrency), targets.length));
+        if (opts.yes !== true && needsConfirmation(targets.length, process.stdin.isTTY === true)) {
+          const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+          const answer = (await rl.question('\nStart? [y/N] ')).trim().toLowerCase();
+          rl.close();
+          if (answer !== 'y' && answer !== 'yes') {
+            console.log('Stopped. Nothing was studied, nothing was spent.');
+            return;
+          }
+        }
+        console.log(`\ncurating ${targets.length} repos, ${concurrency} at a time`);
+      }
       failures += (await curateMany(cfg, targets, undefined, concurrency)).length;
     } else if (!opts.portfolio) {
       console.error('Specify a repo, --all, --stale, or --portfolio.');

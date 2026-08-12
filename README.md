@@ -60,14 +60,23 @@ To hack on the tool itself:
 
 ## Use
 
+    expert                     # where you are and what to run next
     expert init                # first run: write config, connect to Claude Desktop
     expert add <url>…          # add projects to repos.txt and clone them
+    expert doctor              # check the setup and say what to fix
     expert status              # what was found, and what has been studied
     expert refresh <name>…     # study specific repos (adds them if never studied)
     expert refresh             # update everything, re-study what changed, then the portfolio
     expert sync                # clone/update everything in repos.txt (and GitHub, if configured)
     expert curate --stale      # study everything not yet studied — slow, uses the model
+    expert curate --stale --dry-run   # what that would study, and cost, without doing it
     expert curate --portfolio  # redo just the cross-repo map
+
+`expert add` accepts the GitHub shorthand, so `expert add acme/billing-api` is the same
+as pasting the full clone URL.
+
+Batches over 10 repos print a time and cost estimate and ask before starting; `--yes`
+skips the question, `--dry-run` answers it without spending anything.
 
 From a clone, substitute `node dist/cli/index.js` for `expert`.
 

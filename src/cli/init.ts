@@ -152,11 +152,7 @@ export function defaultReposDir(): string {
 /** Folders people actually keep code in, best guess first. */
 export function reposDirCandidates(home = os.homedir()): string[] {
   const named = ['repos', 'code', 'dev', 'src', 'projects', 'source/repos', 'Documents/GitHub'];
-  const roots = [...named.map((n) => path.join(home, ...n.split('/')))];
-  if (process.platform === 'win32') {
-    roots.push('C:\\dev\\repos', 'C:\\dev', 'C:\\code', 'C:\\src');
-  }
-  return roots;
+  return named.map((n) => path.join(home, ...n.split('/')));
 }
 
 function holdsGitRepos(dir: string): boolean {

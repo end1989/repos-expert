@@ -43,8 +43,12 @@ repos/<name>/          →  curator agent  →  knowledge/repos/<name>/*.md  →
 | `src/registry.ts` | The repo list and the staleness computation (`fresh` / `stale` / `uncurated`). |
 | `src/rg.ts` | ripgrep wrapper with the 100-match cap. |
 | `src/cli/index.ts` | Command wiring only — no logic. |
-| `src/cli/init.ts` | First-run setup: writes config, registers with Claude Desktop. |
-| `src/cli/sync.ts` | Clone/update mirrors. |
+| `src/cli/init.ts` | First-run setup: writes config, repos.txt, registers with Claude Desktop. |
+| `src/repos-list.ts` | repos.txt parsing, the transport allowlist, and appends. |
+| `src/cli/sync.ts` | Clone listed repos (ff-only pull) and GitHub repos (hard-reset mirror). |
+| `src/cli/doctor.ts` | Prerequisite checks; pure functions over injected probes. |
+| `src/cli/help.ts` | State-aware orientation text. |
+| `src/cli/estimate.ts` | Batch time/cost estimate, confirmation threshold, dry run. |
 | `src/cli/curate-many.ts` | The worker pool: N repos at a time, failures collected in input order. |
 | `src/cli/refresh.ts` | sync → curate stale → portfolio, under a lockfile. |
 | `src/curator/prompts.ts` | Prompt construction and the `===FILE:` output parser. |
@@ -54,8 +58,12 @@ repos/<name>/          →  curator agent  →  knowledge/repos/<name>/*.md  →
 
 ## Data on disk
 
-- `repos/` — disposable mirrors. Owned by `sync`, which hard-resets them. **Never point
-  `reposDir` at working copies you have uncommitted changes in.**
+- `repos/` — project folders. Repos pulled from a GitHub account are treated as
+  disposable mirrors and **hard-reset** by `sync`; repos you listed in `repos.txt` are
+  updated with a fast-forward pull instead, so a working copy never loses commits.
+  **Don't point `reposDir` at working copies while also setting `githubUser`.**
+- `repos.txt` — the editable list of clone URLs, inside `reposDir` by default so it is
+  found by anyone who opens the folder. `reposListFile` moves it.
 - `knowledge/` — the actual product. Plain markdown, human-editable, worth committing.
 - Config — `EXPERT_CONFIG`, then the working directory, then a per-user location
   (`%APPDATA%\repos-expert\`), then the package root. The per-user location is what makes
@@ -74,6 +82,15 @@ portfolio's own staleness — derives from comparing that to current `HEAD`.
 **Failure is per-repo, never per-batch.** One repo failing to curate is collected and
 reported; the batch continues. A failed sync doesn't stop curation. An empty folder
 produces instructions, not an error.
+
+**A broken setup still starts the MCP server.** `startMcpOrExplain` falls back to a
+server exposing the same tool names, each returning the setup instructions. A client that
+cannot launch the process shows a red light and a log nobody reads; a server that answers
+"run `expert init`" is fixable by the person in the chat window.
+
+**Spending is announced before it happens.** Batches print a time and cost estimate,
+ask above ten repos when a human is at the terminal, and `--dry-run` answers "how big is
+this?" without starting it — the one question you must not have to answer by experiment.
 
 **Caps exist because the client has a context window**: 100 search matches, 2,000 lines or
 200 KB per file read. They are not performance tuning — removing them will flood the

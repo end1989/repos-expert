@@ -204,6 +204,21 @@ catches up next time it's available), and writes its output to
 
 ## When something doesn't work
 
+**Start here:**
+
+```powershell
+expert doctor
+```
+
+It checks Node, the bundled search binary, model access, your config, whether the repos
+folder exists and has anything in it, whether the knowledge folder is writable, and git —
+then names the single first thing to fix. `expert` on its own tells you where your files
+are and what to run next.
+
+If your MCP client shows repos-expert as connected but every answer says it is "not set
+up yet", that is the server telling you `expert init` was never run on this machine. It
+starts anyway rather than showing you a dead server.
+
 **"No projects found"** — `reposDir` is pointing at the wrong folder, or the folders in
 it aren't git repositories. The tool prints the exact path it looked in. To move it, edit
 `reposDir` in your config, or re-run `expert init --repos-dir "<path>" --force`.
