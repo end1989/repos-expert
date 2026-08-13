@@ -27,6 +27,16 @@ describe('resolveWithin', () => {
     expect(() => resolveWithin(root, 'src/../../other')).toThrow(/escapes/);
   });
   it('rejects absolute paths outside the root', () => {
+    // Absolute on both platforms: POSIX resolves this to /etc/passwd, and Windows
+    // resolves a root-relative path against the root's drive (C:\etc\passwd).
+    // Either way it lands outside the repository.
+    expect(() => resolveWithin(root, '/etc/passwd')).toThrow(/escapes/);
+  });
+
+  it.runIf(process.platform === 'win32')('rejects drive-absolute paths outside the root', () => {
+    // Only meaningful on Windows. On POSIX 'C:/windows/system32' is a legitimate
+    // relative name that resolves *inside* the root, so asserting a throw there
+    // would be asserting the wrong behaviour.
     expect(() => resolveWithin(root, 'C:/windows/system32')).toThrow(/escapes/);
   });
 
