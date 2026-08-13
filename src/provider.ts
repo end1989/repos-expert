@@ -50,7 +50,12 @@ export function describeProvider(env: EnvLike, opts: { hasClaudeCode: boolean })
     return { kind: 'api-key', detail: 'ANTHROPIC_API_KEY — billed per token, not from a subscription' };
   }
   if (opts.hasClaudeCode) {
-    return { kind: 'subscription', detail: 'Claude Code sign-in — draws on your Claude subscription' };
+    // Deliberately hedged: we can see the executable, not whether it is signed in.
+    // Claiming "signed in" would be the same false confidence this module exists to stop.
+    return {
+      kind: 'subscription',
+      detail: 'Claude Code on PATH — if it is signed in, curation draws on your Claude subscription',
+    };
   }
   return { kind: 'none', detail: 'nothing configured — studying repos will fail' };
 }

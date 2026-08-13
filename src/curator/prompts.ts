@@ -1,3 +1,5 @@
+import { explainAgentOutput } from './agent-failure.js';
+
 export const DOC_FILES = [
   'card.md',
   'architecture.md',
@@ -126,7 +128,15 @@ export function parseCuratedDocs(
   });
   const missing = expected.filter((f) => docs[f] === undefined || docs[f].length === 0);
   if (missing.length > 0) {
-    throw new Error(`Curator output missing docs: ${missing.join(', ')}`);
+    // An agent that could not run at all returns its reason as plain prose. Report
+    // that instead of a parse failure, which points at the wrong thing entirely.
+    const why = explainAgentOutput(output);
+    if (why !== null) throw new Error(why);
+    throw new Error(
+      `Curator output missing docs: ${missing.join(', ')}\n  The model replied: ${JSON.stringify(
+        output.trim().slice(0, 200),
+      )}`,
+    );
   }
   return docs;
 }
