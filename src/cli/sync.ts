@@ -76,9 +76,12 @@ export async function syncRepos(
     );
   }
 
+  // GitHub resolves repo names case-insensitively, so a named filter must too.
+  // Matching is folded; the canonical name from the source is what reaches any path.
+  const wanted = only === undefined ? undefined : new Set(only.map((n) => n.toLowerCase()));
   if (only !== undefined) {
     for (const name of only) {
-      if (!targets.some((t) => t.name === name)) {
+      if (!targets.some((t) => t.name.toLowerCase() === name.toLowerCase())) {
         const sources = [`the repos list (${cfg.reposListFile})`];
         if (cfg.githubUser !== null) sources.push(`the GitHub account "${cfg.githubUser}"`);
         result.failed.push({ name, error: `not found in ${sources.join(' or ')}` });
@@ -88,7 +91,7 @@ export async function syncRepos(
 
   fs.mkdirSync(cfg.reposDir, { recursive: true });
   for (const target of targets) {
-    if (only !== undefined && !only.includes(target.name)) continue;
+    if (wanted !== undefined && !wanted.has(target.name.toLowerCase())) continue;
     if (cfg.excludeRepos.includes(target.name) || (target.archived && !cfg.includeArchived)) {
       result.skipped.push(target.name);
       continue;

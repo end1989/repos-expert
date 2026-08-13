@@ -219,4 +219,25 @@ describe('syncRepos', () => {
       { name: 'ghost', error: expect.stringMatching(/not found in the repos list[\s\S]*GitHub account/) },
     ]);
   });
+
+  it('matches only-names case-insensitively, keeping the canonical name for paths', async () => {
+    // GitHub treats repo names case-insensitively, so `--only alpha-repo` must find
+    // `Alpha-Repo`. The folder is still created under the canonical name.
+    const root = makeTempDir('expert-sync-');
+    const cfg = makeCfg(root);
+    const calls: string[] = [];
+    const deps: SyncDeps = {
+      listRemote: async () => [remote('Alpha-Repo'), remote('beta')],
+      clone: async (_url, dest) => {
+        calls.push(`clone:${path.basename(dest)}`);
+        fs.mkdirSync(path.join(dest, '.git'), { recursive: true });
+      },
+      update: async () => {},
+      pull: async () => {},
+    };
+    const res = await syncRepos(cfg, deps, ['alpha-repo']);
+    expect(calls).toEqual(['clone:Alpha-Repo']);
+    expect(res.synced).toEqual(['Alpha-Repo']);
+    expect(res.failed).toEqual([]);
+  });
 });
