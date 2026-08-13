@@ -28,6 +28,8 @@ export interface RefreshResult {
   curated: number;
   curateFailed: CurateFailure[];
   uncurated: string[];
+  /** Named repos sync deliberately left alone — excluded, or archived without includeArchived. */
+  skipped: string[];
   portfolioOk: boolean;
   portfolioError: string | null;
 }
@@ -83,13 +85,22 @@ export async function runRefresh(
       curated: 0,
       curateFailed: [],
       uncurated: [],
+      skipped: [],
       portfolioOk: false,
       portfolioError: null,
     };
 
+    // Sync reports what it deliberately left alone. Curating those anyway would spend
+    // money describing a stale mirror and then stamp it as freshly studied.
+    const skippedBySync = new Set(sync.skipped.map((n) => n.toLowerCase()));
+
     const targets: RepoStatus[] = [];
     if (names !== undefined) {
       for (const name of names) {
+        if (skippedBySync.has(name.toLowerCase())) {
+          result.skipped.push(name);
+          continue;
+        }
         try {
           targets.push(await deps.getStatus(cfg, name));
         } catch (err) {

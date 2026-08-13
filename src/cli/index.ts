@@ -315,6 +315,11 @@ program
         `uncurated (not auto-curated — add with \`expert refresh <name>\`): ${res.uncurated.join(', ')}`,
       );
     }
+    if (res.skipped.length > 0) {
+      console.log(
+        `skipped (excluded, or archived without "includeArchived" — not synced, not curated): ${res.skipped.join(', ')}`,
+      );
+    }
     for (const f of res.syncFailed) {
       console.error(`  FAILED ${f.name}: ${f.error}`);
     }

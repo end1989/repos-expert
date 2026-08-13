@@ -92,6 +92,22 @@ describe('runRefresh', () => {
     expect(res.curated).toBe(2);
   });
 
+  it('named mode: a repo sync deliberately skipped is not curated from its stale mirror', async () => {
+    // excludeRepos / archived-without-includeArchived means sync left the folder
+    // untouched. Curating it anyway would spend money describing a stale copy and
+    // report it as freshly studied.
+    const cfg = makeCfg(makeTempDir('expert-rf-'));
+    const { deps, calls } = makeDeps({
+      sync: async () => ({ synced: [], skipped: ['Archived-One'], failed: [] }),
+    });
+    const res = await runRefresh(cfg, ['archived-one', 'alpha'], deps);
+    expect(calls.curate).toEqual(['alpha']);
+    expect(res.skipped).toEqual(['archived-one']);
+    expect(res.curated).toBe(1);
+    expect(res.curateFailed).toEqual([]);
+    expect(calls.portfolio).toEqual(['yes']);
+  });
+
   it('named mode: unknown name fails but the rest continue and portfolio runs', async () => {
     const cfg = makeCfg(makeTempDir('expert-rf-'));
     const { deps, calls } = makeDeps();
