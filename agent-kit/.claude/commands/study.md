@@ -25,7 +25,9 @@ For each named repo:
    Pass both to the curator and tell it to **update rather than rewrite** — preserve
    still-valid insight, revise what changed.
 
-3. Launch the `curator` subagent for that repo. Give it the repo's absolute path, the git
+3. Launch the `curator` subagent for that repo. If `.claude/agents/curator.md` is not
+   installed, use any read-only agent (`Explore`) instead, and give it the evidence rule
+   and document list from `CLAUDE.md`. Give it the repo's absolute path, the git
    context above, and the previous docs if any. **Launch all named repos concurrently** —
    one Task call per repo in a single message — so a long batch runs in parallel and each
    gets its own context.
@@ -36,6 +38,10 @@ For each named repo:
    a path with `..`, a different name, an absolute path — is discarded, and you tell the
    user it was. That check is what keeps a repository's contents from writing outside
    `_knowledge/`.
+
+   **Never write `notes.md`.** It is hand-written by the user and survives every study run.
+   If it exists, read it first and treat it as authoritative where it conflicts with what
+   the curator returned — a person wrote it on purpose.
 
 5. Write `_knowledge/<repo>/meta.json`:
 
