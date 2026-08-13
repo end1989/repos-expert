@@ -27,6 +27,9 @@ param(
 $ErrorActionPreference = 'Stop'
 $template = Join-Path $PSScriptRoot 'template'
 
+$versionFile = Join-Path $PSScriptRoot 'VERSION'
+$kitVersion = if (Test-Path $versionFile) { (Get-Content $versionFile -Raw).Trim() } else { 'unknown' }
+
 if (-not (Test-Path $template)) {
   throw "Kit is incomplete: $template is missing. Copy the whole agent-kit folder, not just this script."
 }
@@ -38,7 +41,8 @@ $repos = @(Get-ChildItem -Path $Into -Directory -ErrorAction SilentlyContinue |
            Where-Object { Test-Path (Join-Path $_.FullName '.git') })
 
 Write-Host ""
-Write-Host "Installing into $Into" -ForegroundColor Cyan
+Write-Host "repo-expert agent kit $kitVersion" -ForegroundColor Cyan
+Write-Host "Installing into $Into"
 Write-Host "  found $($repos.Count) git repositories there"
 if ($repos.Count -eq 0) {
   Write-Host "  (none yet - that is fine, the kit still installs; add repos before /study)" -ForegroundColor Yellow
@@ -76,6 +80,10 @@ foreach ($sub in @('agents', 'commands')) {
 
 New-Item -ItemType Directory -Force -Path (Join-Path $Into '_knowledge') | Out-Null
 Write-Host "  + _knowledge\  (empty until you study something)"
+
+# Stamped so "which version do you have?" has an answer months from now.
+Set-Content -Path (Join-Path $dest 'kit-version.txt') -Value $kitVersion -Encoding ascii
+Write-Host "  + .claude\kit-version.txt  ($kitVersion)"
 
 Write-Host ""
 Write-Host "Done. Nothing is running - the kit is just files." -ForegroundColor Green

@@ -12,6 +12,7 @@ INTO="${1:-}"
 FORCE="${2:-}"
 KIT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TEMPLATE="$KIT/template"
+KIT_VERSION="$(cat "$KIT/VERSION" 2>/dev/null || echo unknown)"
 
 if [ -z "$INTO" ]; then
   echo "usage: $0 <folder-of-repos> [--force]" >&2
@@ -24,6 +25,7 @@ count=0
 for d in "$INTO"/*/; do [ -d "$d/.git" ] && count=$((count+1)); done
 
 echo
+echo "repo-expert agent kit $KIT_VERSION"
 echo "Installing into $INTO"
 echo "  found $count git repositories there"
 [ "$count" -eq 0 ] && echo "  (none yet - the kit still installs; add repos before /study)"
@@ -52,6 +54,10 @@ done
 
 mkdir -p "$INTO/_knowledge"
 echo "  + _knowledge/  (empty until you study something)"
+
+# Stamped so "which version do you have?" has an answer months from now.
+echo "$KIT_VERSION" > "$INTO/.claude/kit-version.txt"
+echo "  + .claude/kit-version.txt  ($KIT_VERSION)"
 
 cat <<EOF
 

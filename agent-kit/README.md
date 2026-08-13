@@ -1,5 +1,7 @@
 # The agent kit
 
+*Kit version 1.0.0 - check yours with `cat .claude/kit-version.txt` in your repos folder.*
+
 Turn a folder of code repositories into something you can ask questions about — using
 only Claude Code. No server, no npm package, nothing running in the background.
 
