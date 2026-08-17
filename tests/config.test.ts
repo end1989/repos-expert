@@ -21,7 +21,7 @@ describe('loadConfig', () => {
     expect(cfg.model).toBe('claude-sonnet-5');
     expect(cfg.excludeRepos).toEqual([]);
     expect(cfg.includeArchived).toBe(false);
-    expect(cfg.curateConcurrency).toBe(4);
+    expect(cfg.curateConcurrency).toBe(2);
     expect(cfg.curateTimeoutMinutes).toBe(25);
   });
 

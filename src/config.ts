@@ -39,7 +39,7 @@ const DEFAULTS = {
   model: 'claude-sonnet-5',
   excludeRepos: [] as string[],
   includeArchived: false,
-  curateConcurrency: 4,
+  curateConcurrency: 2,
   curateTimeoutMinutes: 25,
 };
 
