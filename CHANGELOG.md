@@ -9,6 +9,34 @@ patch bumps are fixes and additive changes). Dates are npm publish dates (UTC).
 
 Nothing yet.
 
+## [0.1.11] — 2026-08-17
+
+### Added
+- **Knowledge docs as MCP resources.** `expert://portfolio`, `expert://cross-repo-map`,
+  and `expert://repos/{repo}/{doc}` (with completion for `repo` and `doc`), so clients
+  that attach context — Claude Desktop's "+" menu, VS Code — can pick a doc without a
+  tool call. The resource list stays small on purpose: portfolio, cross-repo map, and
+  one `card` per repo; the other four docs are one template away. Same staleness banner
+  and provenance footer as `get_repo_knowledge`.
+- **`expert doctor` now knows whether Claude Code is signed in.** It asks
+  `claude auth status` (no shell, 10 s cap) and reports "Claude Code signed in
+  (claude.ai, max)" — or warns "installed but not signed in" with `claude auth login` as
+  the fix. It repeats only how you are signed in, never the account. When the probe
+  cannot run (older Claude Code, a shim it will not execute) the old hedged wording
+  stays. An API key, custom endpoint or cloud provider still outranks it — that is what
+  would be billed.
+- SETUP.md covers macOS and Linux: install commands, the config / knowledge / Claude
+  Desktop paths per platform, the macOS PATH gotcha, and a cron line (with the
+  launchd / systemd catch-up note) as the counterpart of `schedule-refresh.ps1`.
+  `doctor`'s Node and git fix hints are no longer Windows-only.
+
+### Changed
+- `search_code` and `find_files` return `src/server.js:12:` on every OS — no `./` or
+  `.\` prefix, forward slashes on Windows — so a model sees one path shape everywhere.
+- `expert mcp` no longer loads the curator or the Claude Agent SDK; those are imported
+  only when `curate`/`refresh` run. The server process now loads 7 packages instead of
+  11, and a test traces the built CLI to keep it that way.
+
 ## [0.1.10] — 2026-08-17
 
 ### Fixed
@@ -148,7 +176,8 @@ First public release.
 - Works without GitHub: an empty folder or a failed sync degrades with guidance instead of
   failing.
 
-[Unreleased]: https://github.com/end1989/repos-expert/compare/v0.1.10...HEAD
+[Unreleased]: https://github.com/end1989/repos-expert/compare/v0.1.11...HEAD
+[0.1.11]: https://github.com/end1989/repos-expert/compare/v0.1.10...v0.1.11
 [0.1.10]: https://github.com/end1989/repos-expert/compare/v0.1.9...v0.1.10
 [0.1.9]: https://github.com/end1989/repos-expert/compare/v0.1.8...v0.1.9
 [0.1.8]: https://github.com/end1989/repos-expert/compare/v0.1.7...v0.1.8

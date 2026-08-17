@@ -83,13 +83,31 @@ Nothing here needs an API key or a credit card if you already pay for Claude.
 
 ### 1. Install the pieces
 
+Windows:
+
 ```powershell
 winget install OpenJS.NodeJS.LTS
 winget install Git.Git            # optional
 winget install GitHub.cli         # optional
 ```
 
-Close and reopen your terminal afterwards so it picks up the new commands.
+macOS (Homebrew) / Linux:
+
+```sh
+brew install node git gh          # macOS
+sudo apt install nodejs git gh    # Debian/Ubuntu — check `node --version` is 20+; nodesource.com if not
+```
+
+Close and reopen your terminal afterwards so it picks up the new commands. Everything
+below is the same on every platform except where a path is spelled out; the table:
+
+| | Windows | macOS | Linux |
+| --- | --- | --- | --- |
+| Your settings (`expert init` writes it) | `%APPDATA%\repos-expert\expert.config.json` | `~/.config/repos-expert/expert.config.json` | `~/.config/repos-expert/expert.config.json` (or `$XDG_CONFIG_HOME`) |
+| Knowledge base | next to the settings file, `knowledge/` | same | same |
+| Claude Desktop config | `%APPDATA%\Claude\claude_desktop_config.json` | `~/Library/Application Support/Claude/claude_desktop_config.json` | no Claude Desktop — connect Claude Code or VS Code (README) |
+
+Bare `expert` prints the real paths on your machine.
 
 ### 2. Get the tool ready
 
@@ -159,7 +177,9 @@ whole time. Naming projects is usually the better choice.
 
 ### 6. Connect it to Claude Desktop
 
-Edit `%APPDATA%\Claude\claude_desktop_config.json` (create it if missing):
+Edit `%APPDATA%\Claude\claude_desktop_config.json` (Windows) or
+`~/Library/Application Support/Claude/claude_desktop_config.json` (macOS); create it if
+missing:
 
 ```json
 {
@@ -172,8 +192,13 @@ Edit `%APPDATA%\Claude\claude_desktop_config.json` (create it if missing):
 }
 ```
 
-Use the real full path, and forward slashes. Restart Claude Desktop, and ask it
+Use the real full path, and forward slashes. On macOS, Claude Desktop does not see the
+PATH your terminal has, so if it reports the server as failing to start, replace
+`"node"` with the full path `which node` prints. Restart Claude Desktop, and ask it
 something like *"What projects do I have, and what do they do?"*
+
+On Linux there is no Claude Desktop; connect Claude Code (`claude mcp add repos-expert
+-- node /full/path/to/repos-expert/dist/cli/index.js mcp`) or VS Code — see the README.
 
 ---
 
@@ -188,7 +213,7 @@ node dist/cli/index.js refresh          # re-studies only what changed
 You don't have to remember to do this. Answers about out-of-date projects arrive with a
 warning attached, so you'll be told when it's worth re-running.
 
-Or never run it at all — schedule it:
+Or never run it at all — schedule it. Windows:
 
 ```powershell
 .\scripts\schedule-refresh.ps1                       # Sundays at 03:00
@@ -199,6 +224,19 @@ Or never run it at all — schedule it:
 It only re-studies repos whose code changed, skips the run if the machine is off (and
 catches up next time it's available), and writes its output to
 `%LOCALAPPDATA%\repos-expert\weekly-refresh.log`.
+
+macOS / Linux — a weekly cron entry does the same job (`crontab -e`, one line):
+
+```
+0 3 * * 0  /full/path/to/expert refresh >> ~/.local/state/repos-expert/weekly-refresh.log 2>&1
+```
+
+Use the full path `which expert` prints — cron's PATH is minimal — and create the log
+folder once (`mkdir -p ~/.local/state/repos-expert`). Plain cron skips a run if the
+machine is asleep; on macOS a `launchd` agent with `StartCalendarInterval` catches up on
+wake, and on Linux a systemd user timer with `Persistent=true` does — both take the same
+one-line command. Whatever runs it needs Claude Code signed in for the account that owns
+the crontab, or `curatorEnv` in your config (below) pointing somewhere else.
 
 ---
 
