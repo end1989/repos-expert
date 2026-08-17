@@ -7,6 +7,10 @@ patch bumps are fixes and additive changes). Dates are npm publish dates (UTC).
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.1.9] — 2026-08-17
+
 ### Changed
 - Default `curateConcurrency` is now **2** (was 4). `expert init` always wrote 2, and
   above 4 the API tends to throttle — a throttled repo that hits `curateTimeoutMinutes`
@@ -26,6 +30,9 @@ patch bumps are fixes and additive changes). Dates are npm publish dates (UTC).
 ### Fixed
 - README and SETUP said the curator writes four documents; it has written five since
   0.1.2 (`interfaces.md`).
+- The tarball guard (`tests/tarball.test.ts`) read `npm pack --json` as an array; npm 12
+  prints an object keyed by package name, which made the first run of the release
+  workflow fail. It now accepts both shapes.
 
 ## [0.1.8] — 2026-08-17
 
@@ -120,7 +127,8 @@ First public release.
 - Works without GitHub: an empty folder or a failed sync degrades with guidance instead of
   failing.
 
-[Unreleased]: https://github.com/end1989/repos-expert/compare/v0.1.8...HEAD
+[Unreleased]: https://github.com/end1989/repos-expert/compare/v0.1.9...HEAD
+[0.1.9]: https://github.com/end1989/repos-expert/compare/v0.1.8...v0.1.9
 [0.1.8]: https://github.com/end1989/repos-expert/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/end1989/repos-expert/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/end1989/repos-expert/releases/tag/v0.1.6

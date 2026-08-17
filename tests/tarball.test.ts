@@ -56,6 +56,31 @@ function npmCli(): string | null {
   return candidates.find((c) => fs.existsSync(c)) ?? null;
 }
 
+interface PackEntry {
+  files: Array<{ path: string }>;
+}
+
+/**
+ * `npm pack --json` printed an array of packages through npm 11 and an object keyed by
+ * package name from npm 12. Accept both — the release workflow installs npm@latest, CI
+ * uses whatever Node bundles, and this guard must not depend on which one ran it.
+ */
+export function firstPackedEntry(parsed: unknown): PackEntry {
+  const candidate = Array.isArray(parsed)
+    ? (parsed[0] as unknown)
+    : parsed !== null && typeof parsed === 'object'
+      ? (Object.values(parsed as Record<string, unknown>)[0] as unknown)
+      : undefined;
+  if (
+    candidate === null ||
+    typeof candidate !== 'object' ||
+    !Array.isArray((candidate as { files?: unknown }).files)
+  ) {
+    throw new Error(`npm pack --json returned no packages (got ${JSON.stringify(parsed).slice(0, 120)})`);
+  }
+  return candidate as PackEntry;
+}
+
 function packedPaths(): string[] {
   const cli = npmCli();
   if (cli === null) throw new Error('could not locate npm-cli.js to run `npm pack --dry-run`');
@@ -65,11 +90,24 @@ function packedPaths(): string[] {
     stdio: ['ignore', 'pipe', 'ignore'],
     maxBuffer: 16 * 1024 * 1024,
   });
-  const parsed = JSON.parse(out) as Array<{ files: Array<{ path: string }> }>;
-  const first = parsed[0];
-  if (first === undefined) throw new Error('npm pack --json returned no packages');
-  return first.files.map((f) => f.path.replace(/\\/g, '/'));
+  return firstPackedEntry(JSON.parse(out)).files.map((f) => f.path.replace(/\\/g, '/'));
 }
+
+describe('npm pack --json output shapes', () => {
+  const entry = { files: [{ path: 'package.json' }] };
+
+  it('accepts the npm <= 11 array shape', () => {
+    expect(firstPackedEntry([entry])).toBe(entry);
+  });
+
+  it('accepts the npm >= 12 object-keyed-by-name shape', () => {
+    expect(firstPackedEntry({ 'repos-expert': entry })).toBe(entry);
+  });
+
+  it.each([[], {}, null, 'nope', [{ nope: true }]])('rejects %j', (bad) => {
+    expect(() => firstPackedEntry(bad)).toThrow(/returned no packages/);
+  });
+});
 
 describe('published tarball', () => {
   const paths = packedPaths();
