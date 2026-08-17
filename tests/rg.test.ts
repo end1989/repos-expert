@@ -23,6 +23,18 @@ describe('ripgrep wrapper', () => {
     expect(out).toMatch(/auth\.ts:1:/);
   });
 
+  it('prints repo-relative paths with forward slashes and no leading ./ — the same on every OS', async () => {
+    const out = await searchText(root, 'login');
+    const paths = out.split('\n').map((l) => l.split(':')[0]);
+    expect(paths).toContain('src/auth.ts');
+    for (const p of paths) {
+      expect(p).not.toMatch(/^\.[\\/]/);
+      expect(p).not.toContain('\\');
+    }
+    const files = await listFiles(root, '*.ts');
+    expect(files.split('\n')).toContain('src/auth.ts');
+  });
+
   it('filters with a glob', async () => {
     const out = await searchText(root, 'login', '*.ts');
     expect(out).toContain('auth.ts');
@@ -42,7 +54,7 @@ describe('ripgrep wrapper', () => {
 
   it('lists files by glob', async () => {
     const out = await listFiles(root, '*.ts');
-    expect(out).toContain(path.join('src', 'auth.ts'));
+    expect(out).toContain('src/auth.ts');
     expect(out).not.toContain('readme.md');
   });
 });

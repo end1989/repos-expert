@@ -11,6 +11,14 @@ function capLines(text: string): string {
   return lines.slice(0, MAX_MATCHES).join('\n') + `\n… truncated to first ${MAX_MATCHES} results.`;
 }
 
+/** rg prints './src/x.ts' when handed '.'; a model wants 'src/x.ts', the same on every OS. */
+function stripDotSlash(out: string): string {
+  return out
+    .split('\n')
+    .map((l) => (l.startsWith('./') ? l.slice(2) : l))
+    .join('\n');
+}
+
 async function rg(args: string[], cwd: string): Promise<string> {
   try {
     const { stdout } = await run(rgPath, args, { cwd, maxBuffer: 10 * 1024 * 1024 });
@@ -23,14 +31,16 @@ async function rg(args: string[], cwd: string): Promise<string> {
 }
 
 export async function searchText(root: string, query: string, glob?: string): Promise<string> {
-  const args = ['-n', '--no-heading', '-S', '--max-columns', '250'];
+  const args = ['-n', '--no-heading', '-S', '--max-columns', '250', '--path-separator', '/'];
   if (glob) args.push('-g', glob);
+  // The explicit '.' is load-bearing: with no path and a piped stdin, rg reads stdin and
+  // waits forever. It costs a './' prefix on every line, which stripDotSlash removes.
   args.push('--', query, '.');
-  const out = await rg(args, root);
+  const out = stripDotSlash(await rg(args, root));
   return out.length === 0 ? 'No matches.' : capLines(out);
 }
 
 export async function listFiles(root: string, pattern: string): Promise<string> {
-  const out = await rg(['--files', '-g', pattern], root);
+  const out = await rg(['--files', '--path-separator', '/', '-g', pattern], root);
   return out.length === 0 ? 'No matches.' : capLines(out);
 }
