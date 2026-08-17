@@ -13,6 +13,7 @@ function probes(over: Partial<Probes> = {}): Probes {
     version: '1.2.3',
     clientConfig: null,
     claudeAuth: () => null,
+    profileConfig: null,
     ...over,
   };
 }
@@ -278,5 +279,55 @@ describe('claude desktop launch check', () => {
     );
     expect(c.status).toBe('ok');
     expect(c.detail).toMatch(/docker/);
+  });
+});
+
+describe('claude desktop launch check — profiles', () => {
+  const NODE = process.execPath;
+  function twoProfiles(entry: string, workConfig: string): { path: string; text: string | null } {
+    return {
+      path: 'C:/fake/claude_desktop_config.json',
+      text: JSON.stringify({
+        mcpServers: {
+          'repos-expert': { command: NODE, args: [entry, 'mcp'] },
+          'repos-expert-work': { command: NODE, args: [entry, 'mcp', '--config', workConfig] },
+        },
+      }),
+    };
+  }
+  function fakeInstall(root: string, version: string): string {
+    const pkg = path.join(root, 'node_modules', 'repos-expert');
+    fs.mkdirSync(path.join(pkg, 'dist', 'cli'), { recursive: true });
+    fs.writeFileSync(path.join(pkg, 'package.json'), JSON.stringify({ name: 'repos-expert', version }));
+    fs.writeFileSync(path.join(pkg, 'dist', 'cli', 'index.js'), '');
+    return path.join(pkg, 'dist', 'cli', 'index.js');
+  }
+
+  it('for the default profile, judges the entry without --config', () => {
+    const root = makeTempDir('expert-doctor-');
+    const entry = fakeInstall(root, '1.2.3');
+    const c = find(runChecks(goodConfig(root), probes({ clientConfig: twoProfiles(entry, 'C:/work/expert.config.json'), profileConfig: null })), 'claude desktop');
+    expect(c.status).toBe('ok');
+    expect(c.detail).toMatch(/launches this install/);
+  });
+
+  it('for a named profile, judges the entry whose --config is this config', () => {
+    const root = makeTempDir('expert-doctor-');
+    const entry = fakeInstall(root, '1.2.3');
+    const work = path.join(root, 'work', 'expert.config.json');
+    const c = find(runChecks(goodConfig(root), probes({ clientConfig: twoProfiles(entry, work), profileConfig: work })), 'claude desktop');
+    expect(c.status).toBe('ok');
+    expect(c.detail).toContain('repos-expert-work');
+  });
+
+  it('warns, naming the other profiles, when this config has no entry', () => {
+    const root = makeTempDir('expert-doctor-');
+    const entry = fakeInstall(root, '1.2.3');
+    const other = path.join(root, 'other', 'expert.config.json');
+    const c = find(runChecks(goodConfig(root), probes({ clientConfig: twoProfiles(entry, 'C:/work/expert.config.json'), profileConfig: other })), 'claude desktop');
+    expect(c.status).toBe('warn');
+    expect(c.detail).toMatch(/not registered/);
+    expect(c.detail).toContain('repos-expert-work');
+    expect(c.fix).toContain('--config');
   });
 });

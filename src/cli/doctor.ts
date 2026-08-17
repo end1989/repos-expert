@@ -35,6 +35,22 @@ export interface Probes {
    * exist). null when the platform has no Claude Desktop location at all.
    */
   clientConfig: { path: string; text: string | null } | null;
+  /**
+   * The config file this run was pointed at with `--config` (a second profile), or null
+   * for the default profile. Decides which client entry is "ours".
+   */
+  profileConfig: string | null;
+}
+
+/** The `--config <path>` an entry launches with, if any. */
+function entryConfigArg(args: string[]): string | null {
+  const i = args.indexOf('--config');
+  return i >= 0 && i + 1 < args.length ? (args[i + 1] ?? null) : null;
+}
+
+function samePath(a: string, b: string): boolean {
+  const norm = (p: string) => path.resolve(p).replace(/\\/g, '/').toLowerCase();
+  return norm(a) === norm(b);
 }
 
 const PACKAGE_NAME = 'repos-expert';
@@ -83,13 +99,37 @@ export function clientLaunchCheck(probes: Probes): Check | null {
       fix: 'Fix the file by hand (there may be a .backup next to it), then: expert init',
     };
   }
-  const entry = parsed.mcpServers?.[PACKAGE_NAME];
-  if (entry === undefined || typeof entry.command !== 'string') {
-    return { name, status: 'warn', detail: `not registered in ${client.path}`, fix: 'expert init' };
+  // Ours are the entries whose key starts with the package name, or that launch our
+  // entry point. Among those, the active profile picks: the default profile owns the
+  // entries with no --config; a named profile owns the one whose --config is its file.
+  const servers = parsed.mcpServers ?? {};
+  const ours = Object.entries(servers).filter(([key, e]) => {
+    const argv = Array.isArray(e.args) ? e.args.filter((a): a is string => typeof a === 'string') : [];
+    return key === PACKAGE_NAME || key.startsWith(`${PACKAGE_NAME}-`) || argv.some((a) => a.includes(PACKAGE_NAME));
+  });
+  const match = ours.find(([, e]) => {
+    const argv = Array.isArray(e.args) ? e.args.filter((a): a is string => typeof a === 'string') : [];
+    const cfgArg = entryConfigArg(argv);
+    return probes.profileConfig === null ? cfgArg === null : cfgArg !== null && samePath(cfgArg, probes.profileConfig);
+  });
+  if (match === undefined || typeof match[1].command !== 'string') {
+    const others = ours.map(([key]) => key);
+    const initCmd = probes.profileConfig === null ? 'expert init' : `expert init --config "${probes.profileConfig}"`;
+    return {
+      name,
+      status: 'warn',
+      detail:
+        others.length > 0
+          ? `not registered for this config in ${client.path} (registered: ${others.join(', ')})`
+          : `not registered in ${client.path}`,
+      fix: initCmd,
+    };
   }
+  const [entryKey, entry] = match;
   const args = Array.isArray(entry.args) ? entry.args.filter((a): a is string => typeof a === 'string') : [];
-  const command = entry.command;
+  const command: string = typeof entry.command === 'string' ? entry.command : '';
   const exe = path.basename(command).toLowerCase();
+  const as = entryKey === PACKAGE_NAME ? '' : ` as "${entryKey}"`;
 
   if (exe === 'npx' || exe === 'npx.cmd') {
     const spec = args.find((a) => a.startsWith(PACKAGE_NAME));
@@ -140,7 +180,7 @@ export function clientLaunchCheck(probes: Probes): Check | null {
       fix: 'expert init',
     };
   }
-  return { name, status: 'ok', detail: `launches this install (${launched}) — ${script}` };
+  return { name, status: 'ok', detail: `launches this install (${launched})${as} — ${script}` };
 }
 
 const MIN_NODE_MAJOR = 20;

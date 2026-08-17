@@ -12,6 +12,8 @@ export interface InitOptions {
   force?: boolean;
   skipClient?: boolean;
   skipWorkspaceGuide?: boolean;
+  /** Label for a second collection; becomes the client entry `repos-expert-<label>`. */
+  name?: string;
 }
 
 export interface InitResult {
@@ -21,13 +23,33 @@ export interface InitResult {
   reposListPath: string | null;
   clientConfigPath: string | null;
   clientWritten: boolean;
+  /** The key written into the client's mcpServers (`repos-expert`, or `repos-expert-<label>`). */
+  clientEntry: string;
   notes: string[];
 }
 
 export interface InitPaths {
+  /** Where the config goes: the per-user default, or whatever `--config` named. */
   configPath: string;
+  /**
+   * The per-user default. When given and configPath differs from it, this is a second
+   * profile; when omitted, configPath is treated as the default.
+   */
+  defaultConfigPath?: string;
   clientConfigPath: string | null;
   entryPoint: string;
+}
+
+/**
+ * The client-side name for a profile. Keys in Claude Desktop's config are used as
+ * identifiers, so the label is slugged: `Client Work (2026)` → `repos-expert-client-work-2026`.
+ */
+export function clientEntryName(label: string | undefined): string {
+  const slug = (label ?? '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return slug.length === 0 ? PACKAGE_NAME : `${PACKAGE_NAME}-${slug}`;
 }
 
 /** Where Claude Desktop keeps its MCP server list, or null on platforms without it. */
@@ -60,14 +82,17 @@ export function claudeDesktopConfigPath(platform: NodeJS.Platform = process.plat
 export function mcpLaunchCommand(
   entryPoint: string,
   nodeExecPath: string = process.execPath,
+  /** For a second profile: the config file the server should load. Omit for the default. */
+  configPath: string | null = null,
 ): { command: string; args: string[] } {
   // Separator-agnostic on purpose: this path can arrive as a Windows path or as
   // a POSIX one from fileURLToPath, and guessing wrong writes a broken command.
   const normalized = entryPoint.replace(/\\/g, '/');
+  const profile = configPath === null ? [] : ['--config', configPath.replace(/\\/g, '/')];
   if (normalized.includes('_npx')) {
-    return { command: 'npx', args: ['-y', `${PACKAGE_NAME}@latest`, 'mcp'] };
+    return { command: 'npx', args: ['-y', `${PACKAGE_NAME}@latest`, 'mcp', ...profile] };
   }
-  return { command: nodeExecPath, args: [normalized, 'mcp'] };
+  return { command: nodeExecPath, args: [normalized, 'mcp', ...profile] };
 }
 
 /** Adds our server to a client config without disturbing anything already there. */
@@ -75,6 +100,7 @@ export function mergeClientConfig(
   existingJson: string | null,
   command: string,
   args: string[],
+  key: string = PACKAGE_NAME,
 ): string {
   let existing: Record<string, unknown> = {};
   if (existingJson !== null && existingJson.trim().length > 0) {
@@ -85,19 +111,18 @@ export function mergeClientConfig(
     }
   }
   const servers = { ...((existing.mcpServers as Record<string, unknown> | undefined) ?? {}) };
-  servers[PACKAGE_NAME] = { command, args };
+  servers[key] = { command, args };
   return `${JSON.stringify({ ...existing, mcpServers: servers }, null, 2)}\n`;
 }
 
-export function defaultConfigBody(opts: InitOptions): string {
+export function defaultConfigBody(opts: InitOptions, configPath: string = userConfigPath()): string {
   const body: Record<string, unknown> = {};
   if (opts.githubUser !== undefined && opts.githubUser.length > 0) {
     body.githubUser = opts.githubUser;
   }
   body.reposDir = (opts.reposDir ?? path.join(os.homedir(), 'repos')).replace(/\\/g, '/');
-  body.knowledgeDir = path
-    .join(path.dirname(userConfigPath()), 'knowledge')
-    .replace(/\\/g, '/');
+  // Knowledge lives beside its config, so a second profile gets its own knowledge base.
+  body.knowledgeDir = path.join(path.dirname(configPath), 'knowledge').replace(/\\/g, '/');
   body.model = 'claude-sonnet-5';
   body.excludeRepos = [];
   body.includeArchived = false;
@@ -217,9 +242,22 @@ export function runInit(opts: InitOptions, paths: InitPaths): InitResult {
     }
   } else {
     fs.mkdirSync(path.dirname(paths.configPath), { recursive: true });
-    fs.writeFileSync(paths.configPath, defaultConfigBody(opts));
+    fs.writeFileSync(paths.configPath, defaultConfigBody(opts, paths.configPath));
     configWritten = true;
   }
+
+  // A second profile is any config that is not the per-user default: it gets its own
+  // client entry, and the server is told which config to load.
+  const isProfile =
+    paths.defaultConfigPath !== undefined &&
+    path.resolve(paths.configPath) !== path.resolve(paths.defaultConfigPath);
+  const clientEntry = isProfile
+    ? clientEntryName(
+        opts.name !== undefined && opts.name.length > 0
+          ? opts.name
+          : path.basename(path.dirname(path.resolve(paths.configPath))),
+      )
+    : PACKAGE_NAME;
   let reposListPath: string | null = null;
 
   // The list is the answer to "I have an empty folder, now what?" — so it is written
@@ -263,7 +301,11 @@ export function runInit(opts: InitOptions, paths: InitPaths): InitResult {
       'No Claude Desktop config location on this platform — add the server to your MCP client by hand.',
     );
   } else {
-    const { command, args } = mcpLaunchCommand(paths.entryPoint);
+    const { command, args } = mcpLaunchCommand(
+      paths.entryPoint,
+      process.execPath,
+      isProfile ? path.resolve(paths.configPath) : null,
+    );
     const existing = fs.existsSync(paths.clientConfigPath)
       ? fs.readFileSync(paths.clientConfigPath, 'utf8')
       : null;
@@ -272,8 +314,11 @@ export function runInit(opts: InitOptions, paths: InitPaths): InitResult {
       notes.push(`Backed up the previous Claude Desktop config to ${paths.clientConfigPath}.backup`);
     }
     fs.mkdirSync(path.dirname(paths.clientConfigPath), { recursive: true });
-    fs.writeFileSync(paths.clientConfigPath, mergeClientConfig(existing, command, args));
+    fs.writeFileSync(paths.clientConfigPath, mergeClientConfig(existing, command, args, clientEntry));
     clientWritten = true;
+    if (isProfile) {
+      notes.push(`Registered as "${clientEntry}" in Claude Desktop, alongside any other profiles.`);
+    }
     if (command === 'npx') {
       notes.push('Claude Desktop will launch the newest published version through npx (needs network at launch).');
     } else {
@@ -294,6 +339,7 @@ export function runInit(opts: InitOptions, paths: InitPaths): InitResult {
     reposListPath,
     clientConfigPath: paths.clientConfigPath,
     clientWritten,
+    clientEntry,
     notes,
   };
 }

@@ -31,7 +31,28 @@ const program = new Command();
 // Read the real version rather than a literal that silently drifts from package.json.
 const { version } = createRequire(import.meta.url)('../../package.json') as { version: string };
 
-program.name('expert').description('Answers questions about a folder of code repositories').version(version);
+program
+  .name('expert')
+  .description('Answers questions about a folder of code repositories')
+  .version(version)
+  .option(
+    '--config <path>',
+    'use this config file instead of the default — a second collection with its own knowledge base',
+  );
+
+/**
+ * `--config` names a profile: every command in this process reads that file, and the
+ * knowledge base beside it. It is applied through EXPERT_CONFIG, which config
+ * resolution already honours first, so nothing downstream needs to know.
+ */
+let profileConfig: string | null = null;
+program.hook('preAction', () => {
+  const opt = (program.opts() as { config?: string }).config;
+  if (opt !== undefined && opt.length > 0) {
+    profileConfig = path.resolve(opt);
+    process.env.EXPERT_CONFIG = profileConfig;
+  }
+});
 
 program
   .command('init')
@@ -41,6 +62,7 @@ program
   .option('--force', 'overwrite an existing config')
   .option('--skip-client', 'do not touch the Claude Desktop config')
   .option('--skip-workspace-guide', 'do not write CLAUDE.md into your repos folder')
+  .option('--name <label>', 'with --config: label for this collection (client entry becomes repos-expert-<label>)')
   .option('-y, --yes', 'accept the default repos folder without asking')
   .action(async (opts: {
     reposDir?: string;
@@ -48,6 +70,7 @@ program
     force?: boolean;
     skipClient?: boolean;
     skipWorkspaceGuide?: boolean;
+    name?: string;
     yes?: boolean;
   }) => {
     // Guessing the folder is what leaves people staring at an empty one, so ask
@@ -66,7 +89,8 @@ program
     }
 
     const res = runInit(opts, {
-      configPath: userConfigPath(),
+      configPath: profileConfig ?? userConfigPath(),
+      defaultConfigPath: userConfigPath(),
       clientConfigPath: claudeDesktopConfigPath(),
       entryPoint: fileURLToPath(import.meta.url),
     });
@@ -254,6 +278,7 @@ program
       env: process.env,
       version,
       claudeAuth: claudeAuthStatus,
+      profileConfig,
       clientConfig:
         clientPath === null
           ? null

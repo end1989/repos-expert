@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {
   claudeDesktopConfigPath,
+  clientEntryName,
   defaultConfigBody,
   mcpLaunchCommand,
   mergeClientConfig,
@@ -35,13 +36,45 @@ describe('mcpLaunchCommand', () => {
     expect(mcpLaunchCommand(entry, NODE)).toEqual({ command: 'npx', args: ['-y', 'repos-expert@latest', 'mcp'] });
   });
 
+  it('passes --config through when the profile is not the default one', () => {
+    const entry = path.join('C:', 'dev', 'repos-expert', 'dist', 'cli', 'index.js');
+    const res = mcpLaunchCommand(entry, NODE, 'C:/work/expert.config.json');
+    expect(res.args).toEqual(['C:/dev/repos-expert/dist/cli/index.js', 'mcp', '--config', 'C:/work/expert.config.json']);
+    const npx = mcpLaunchCommand(path.join('C:', 'x', '_npx', 'abc', 'node_modules', 'repos-expert', 'dist', 'cli', 'index.js'), NODE, '/home/me/work/expert.config.json');
+    expect(npx.args).toEqual(['-y', 'repos-expert@latest', 'mcp', '--config', '/home/me/work/expert.config.json']);
+  });
+
   it('accepts POSIX paths too', () => {
     const res = mcpLaunchCommand('/usr/local/lib/node_modules/repos-expert/dist/cli/index.js', '/usr/local/bin/node');
     expect(res).toEqual({ command: '/usr/local/bin/node', args: ['/usr/local/lib/node_modules/repos-expert/dist/cli/index.js', 'mcp'] });
   });
 });
 
+describe('clientEntryName', () => {
+  it('is the bare package name for the default profile', () => {
+    expect(clientEntryName(undefined)).toBe('repos-expert');
+    expect(clientEntryName('')).toBe('repos-expert');
+  });
+
+  it('suffixes a slug of the label — client keys must stay identifier-like', () => {
+    expect(clientEntryName('work')).toBe('repos-expert-work');
+    expect(clientEntryName('Client Work (2026)!')).toBe('repos-expert-client-work-2026');
+  });
+});
+
+describe('mergeClientConfig — profiles', () => {
+  it('writes under the given key so two profiles can coexist', () => {
+    const merged = JSON.parse(mergeClientConfig(
+      JSON.stringify({ mcpServers: { 'repos-expert': { command: 'node', args: ['a.js', 'mcp'] } } }),
+      'node', ['a.js', 'mcp', '--config', 'C:/work/expert.config.json'], 'repos-expert-work',
+    ));
+    expect(Object.keys(merged.mcpServers).sort()).toEqual(['repos-expert', 'repos-expert-work']);
+    expect(merged.mcpServers['repos-expert-work'].args).toContain('--config');
+  });
+});
+
 describe('mergeClientConfig', () => {
+
   it('keeps other MCP servers and unrelated keys', () => {
     const existing = JSON.stringify({
       theme: 'dark',
@@ -205,5 +238,53 @@ describe('runInit', () => {
     );
     expect(res.clientWritten).toBe(false);
     expect(res.notes.join(' ')).toMatch(/by hand/);
+  });
+});
+
+describe('runInit with a second profile', () => {
+  it('writes the config where told, puts knowledge beside it, and registers a --config client entry under a profile key', () => {
+    const root = makeTempDir('expert-init-profile-');
+    const configPath = path.join(root, 'work', 'expert.config.json');
+    const clientConfigPath = path.join(root, 'client', 'claude_desktop_config.json');
+    const res = runInit(
+      { reposDir: path.join(root, 'work-repos'), skipWorkspaceGuide: true, name: 'Work' },
+      {
+        configPath,
+        defaultConfigPath: path.join(root, 'default', 'expert.config.json'),
+        clientConfigPath,
+        entryPoint: '/tmp/node_modules/repos-expert/dist/cli/index.js',
+      },
+    );
+    expect(res.configWritten).toBe(true);
+    const cfg = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    expect(cfg.knowledgeDir.replace(/\\/g, '/')).toBe(path.join(root, 'work', 'knowledge').replace(/\\/g, '/'));
+    const client = JSON.parse(fs.readFileSync(clientConfigPath, 'utf8'));
+    expect(client.mcpServers['repos-expert-work']).toBeDefined();
+    expect(client.mcpServers['repos-expert-work'].args).toEqual(['/tmp/node_modules/repos-expert/dist/cli/index.js', 'mcp', '--config', configPath.replace(/\\/g, '/')]);
+    expect(res.clientEntry).toBe('repos-expert-work');
+  });
+
+  it('derives the profile label from the config folder when none is given', () => {
+    const root = makeTempDir('expert-init-profile-');
+    const configPath = path.join(root, 'Client Two', 'expert.config.json');
+    const clientConfigPath = path.join(root, 'client', 'claude_desktop_config.json');
+    const res = runInit(
+      { reposDir: path.join(root, 'r'), skipWorkspaceGuide: true },
+      { configPath, defaultConfigPath: path.join(root, 'default', 'expert.config.json'), clientConfigPath, entryPoint: 'x/dist/cli/index.js' },
+    );
+    expect(res.clientEntry).toBe('repos-expert-client-two');
+  });
+
+  it('keeps the plain key and no --config for the default profile', () => {
+    const root = makeTempDir('expert-init-profile-');
+    const configPath = path.join(root, 'default', 'expert.config.json');
+    const clientConfigPath = path.join(root, 'client', 'claude_desktop_config.json');
+    const res = runInit(
+      { reposDir: path.join(root, 'r'), skipWorkspaceGuide: true },
+      { configPath, defaultConfigPath: configPath, clientConfigPath, entryPoint: 'x/dist/cli/index.js' },
+    );
+    expect(res.clientEntry).toBe('repos-expert');
+    const client = JSON.parse(fs.readFileSync(clientConfigPath, 'utf8'));
+    expect(client.mcpServers['repos-expert'].args).not.toContain('--config');
   });
 });
