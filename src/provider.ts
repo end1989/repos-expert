@@ -19,6 +19,20 @@ export interface Provider {
   kind: ProviderKind;
   /** Human-readable, and never containing a secret. */
   detail: string;
+  /** The command that turns 'none' into something usable, when there is one. */
+  fix?: string;
+}
+
+/**
+ * What `claude auth status` reports. Only the fields that describe *how* the account is
+ * signed in are ever repeated; the account itself (email, org) is not.
+ */
+export interface ClaudeAuth {
+  loggedIn: boolean;
+  authMethod?: string;
+  subscriptionType?: string;
+  apiProvider?: string;
+  [other: string]: unknown;
 }
 
 export type EnvLike = Record<string, string | undefined>;
@@ -32,7 +46,14 @@ function isOn(value: string | undefined): boolean {
   return isSet(value) && value !== '0' && value!.toLowerCase() !== 'false';
 }
 
-export function describeProvider(env: EnvLike, opts: { hasClaudeCode: boolean }): Provider {
+export function describeProvider(
+  env: EnvLike,
+  opts: {
+    hasClaudeCode: boolean;
+    /** Result of `claude auth status`; null (or omitted) when it could not be asked. */
+    claudeAuth?: ClaudeAuth | null;
+  },
+): Provider {
   if (isOn(env.CLAUDE_CODE_USE_BEDROCK)) {
     return { kind: 'bedrock', detail: 'AWS Bedrock (CLAUDE_CODE_USE_BEDROCK) — billed by AWS' };
   }
@@ -50,8 +71,26 @@ export function describeProvider(env: EnvLike, opts: { hasClaudeCode: boolean })
     return { kind: 'api-key', detail: 'ANTHROPIC_API_KEY — billed per token, not from a subscription' };
   }
   if (opts.hasClaudeCode) {
-    // Deliberately hedged: we can see the executable, not whether it is signed in.
-    // Claiming "signed in" would be the same false confidence this module exists to stop.
+    const auth = opts.claudeAuth ?? null;
+    if (auth !== null && auth.loggedIn) {
+      const how = [auth.authMethod, auth.subscriptionType].filter(
+        (s): s is string => typeof s === 'string' && s.length > 0,
+      );
+      return {
+        kind: 'subscription',
+        detail: `Claude Code signed in${how.length > 0 ? ` (${how.join(', ')})` : ''} — curation draws on that account`,
+      };
+    }
+    if (auth !== null && !auth.loggedIn) {
+      return {
+        kind: 'none',
+        detail: 'Claude Code is installed but not signed in — studying repos will fail until it is',
+        fix: 'claude auth login',
+      };
+    }
+    // The probe could not run (older Claude Code, or a shim we cannot execute without a
+    // shell). Deliberately hedged: we can see the executable, not whether it is signed
+    // in, and claiming "signed in" would be the false confidence this module exists to stop.
     return {
       kind: 'subscription',
       detail: 'Claude Code on PATH — if it is signed in, curation draws on your Claude subscription',

@@ -55,6 +55,15 @@ export function isValidConcurrency(value: unknown): value is number {
   return Number.isInteger(value) && (value as number) >= 1 && (value as number) <= MAX_CURATE_CONCURRENCY;
 }
 
+/** Parses a `--concurrency <n>` flag; lives here so the CLI can define the option without loading the curator. */
+export function parseConcurrency(value: string): number {
+  const n = Number(value.trim() === '' ? NaN : value);
+  if (!isValidConcurrency(n)) {
+    throw new Error(`--concurrency must be an integer between 1 and ${MAX_CURATE_CONCURRENCY}`);
+  }
+  return n;
+}
+
 function packageRootConfigPath(): string {
   // config.js sits at dist/config.js in the build and src/config.ts in dev —
   // '..' lands on the package root in both cases.

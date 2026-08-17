@@ -8,13 +8,14 @@ import { fileURLToPath } from 'node:url';
 import { Command } from 'commander';
 import { rgPath } from '@vscode/ripgrep';
 import { formatDiagnosis, runChecks } from './doctor.js';
+import type { ClaudeAuth } from '../provider.js';
 import {
   estimateBatch,
   formatDryRun,
   formatEstimate,
   needsConfirmation,
 } from './estimate.js';
-import { findConfigPath, loadConfig, userConfigPath } from '../config.js';
+import { findConfigPath, loadConfig, parseConcurrency, userConfigPath } from '../config.js';
 import { addToReposList, readReposList } from '../repos-list.js';
 import { helpText, type HelpState } from './help.js';
 import { claudeDesktopConfigPath, runInit, suggestReposDir } from './init.js';
@@ -22,9 +23,8 @@ import { syncRepos } from './sync.js';
 import { formatStatus } from './status.js';
 import { listRepoStatuses, getRepoStatus } from '../registry.js';
 import { startMcpOrExplain } from '../mcp/server.js';
-import { curateRepo, curatePortfolio } from '../curator/curator.js';
-import { curateMany, parseConcurrency } from './curate-many.js';
-import { runRefresh } from './refresh.js';
+// The curator (and with it the Claude Agent SDK) is imported lazily inside `curate` and
+// `refresh`: `expert mcp` runs in every client session and must not load what it never uses.
 
 const program = new Command();
 
@@ -133,6 +133,53 @@ function onPath(cmd: string): boolean {
   }
 }
 
+/**
+ * Asks Claude Code whether it is signed in (`claude auth status`, JSON). Never throws
+ * and never opens a shell: the executable is located with where/which and run directly;
+ * an npm `.cmd` shim on Windows is run through the package's cli.js with node instead
+ * of through cmd.exe. Returns null whenever the answer cannot be trusted.
+ */
+function claudeAuthStatus(): ClaudeAuth | null {
+  const finder = process.platform === 'win32' ? 'where' : 'which';
+  let found: string;
+  try {
+    found =
+      execFileSync(finder, ['claude'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+        .split(/\r?\n/)
+        .map((s) => s.trim())
+        .find((s) => s.length > 0) ?? '';
+  } catch {
+    return null;
+  }
+  if (found.length === 0) return null;
+
+  let file = found;
+  let args = ['auth', 'status'];
+  if (/\.(cmd|bat)$/i.test(found)) {
+    const cli = path.join(path.dirname(found), 'node_modules', '@anthropic-ai', 'claude-code', 'cli.js');
+    if (!fs.existsSync(cli)) return null;
+    file = process.execPath;
+    args = [cli, 'auth', 'status'];
+  } else if (/\.ps1$/i.test(found)) {
+    return null;
+  }
+  try {
+    const out = execFileSync(file, args, {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 10_000,
+      env: { ...process.env, NO_COLOR: '1' },
+    });
+    const start = out.indexOf('{');
+    if (start < 0) return null;
+    const parsed = JSON.parse(out.slice(start)) as Record<string, unknown>;
+    if (typeof parsed.loggedIn !== 'boolean') return null;
+    return parsed as unknown as ClaudeAuth;
+  } catch {
+    return null;
+  }
+}
+
 /** Never throws: help is what you reach for when things are broken. */
 async function currentHelpState(): Promise<HelpState> {
   const state: HelpState = {
@@ -206,6 +253,7 @@ program
       hasCommand: onPath,
       env: process.env,
       version,
+      claudeAuth: claudeAuthStatus,
       clientConfig:
         clientPath === null
           ? null
@@ -255,6 +303,8 @@ program
   .option('--dry-run', 'show what would be studied, and what it would cost, without doing it')
   .action(async (repoArg: string | undefined, opts: CurateOptions) => {
     const cfg = loadConfig();
+    const { curateRepo, curatePortfolio } = await import('../curator/curator.js');
+    const { curateMany } = await import('./curate-many.js');
     let failures = 0;
 
     if (repoArg !== undefined) {
@@ -312,6 +362,7 @@ program
   .argument('[repos...]', 'limit to these repos and curate them unconditionally')
   .action(async (repos: string[]) => {
     const cfg = loadConfig();
+    const { runRefresh } = await import('./refresh.js');
     const res = await runRefresh(cfg, repos.length > 0 ? repos : undefined);
     console.log(
       `sync: ${res.synced} ok, ${res.syncFailed.length} failed | curate: ${res.curated} ok, ${res.curateFailed.length} failed | portfolio: ${res.portfolioOk ? 'ok' : 'FAILED'}`,

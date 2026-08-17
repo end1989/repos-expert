@@ -12,6 +12,7 @@ function probes(over: Partial<Probes> = {}): Probes {
     env: {},
     version: '1.2.3',
     clientConfig: null,
+    claudeAuth: () => null,
     ...over,
   };
 }
@@ -113,6 +114,20 @@ describe('runChecks', () => {
     expect(find(runChecks(goodConfig(root), probes()), 'model access').detail).toMatch(
       /subscription/i,
     );
+  });
+
+  it('says signed in when the auth probe confirms it', () => {
+    const root = makeTempDir('expert-doctor-');
+    const c = find(runChecks(goodConfig(root), probes({ claudeAuth: () => ({ loggedIn: true, authMethod: 'claude.ai', subscriptionType: 'pro' }) })), 'model access');
+    expect(c.status).toBe('ok');
+    expect(c.detail).toMatch(/signed in/i);
+  });
+
+  it('warns, with the sign-in command, when Claude Code is installed but signed out', () => {
+    const root = makeTempDir('expert-doctor-');
+    const c = find(runChecks(goodConfig(root), probes({ claudeAuth: () => ({ loggedIn: false }) })), 'model access');
+    expect(c.status).toBe('warn');
+    expect(c.fix).toBe('claude auth login');
   });
 
   it('reports a local endpoint configured in curatorEnv, and that it came from config', () => {

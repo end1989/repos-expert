@@ -1,4 +1,4 @@
-import { MAX_CURATE_CONCURRENCY, isValidConcurrency, type ExpertConfig } from '../config.js';
+import type { ExpertConfig } from '../config.js';
 import type { RepoStatus } from '../registry.js';
 import { curateRepo } from '../curator/curator.js';
 
@@ -10,13 +10,7 @@ export interface CurateFailure {
 }
 
 /** Validates a `--concurrency` argument; throws with the CLI-facing message. */
-export function parseConcurrency(value: string): number {
-  const n = Number(value.trim() === '' ? NaN : value);
-  if (!isValidConcurrency(n)) {
-    throw new Error(`--concurrency must be an integer between 1 and ${MAX_CURATE_CONCURRENCY}`);
-  }
-  return n;
-}
+export { parseConcurrency } from '../config.js';
 
 /**
  * Curates `statuses` with at most `concurrency` agents in flight, refilling a

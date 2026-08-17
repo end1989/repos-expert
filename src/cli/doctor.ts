@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { loadConfig, type ExpertConfig } from '../config.js';
-import { curatorEnvFrom, describeProvider, type EnvLike } from '../provider.js';
+import { curatorEnvFrom, describeProvider, type ClaudeAuth, type EnvLike } from '../provider.js';
 import { readReposList } from '../repos-list.js';
 
 export type CheckStatus = 'ok' | 'warn' | 'fail';
@@ -24,6 +24,12 @@ export interface Probes {
   env: EnvLike;
   /** This CLI's own version — what the client *should* be launching. */
   version: string;
+  /**
+   * Asks Claude Code whether it is signed in (`claude auth status`). Returns null when
+   * that could not be determined; must never throw. A function, so the probe only runs
+   * when Claude Code is on PATH and nothing else already decides the provider.
+   */
+  claudeAuth: () => ClaudeAuth | null;
   /**
    * Claude Desktop's config: where it lives and its text (null when the file does not
    * exist). null when the platform has no Claude Desktop location at all.
@@ -183,13 +189,30 @@ function canWrite(dir: string): boolean {
  */
 function modelAccessCheck(probes: Probes, cfg: ExpertConfig | undefined): Check {
   const env = curatorEnvFrom(probes.env, cfg?.curatorEnv);
-  const provider = describeProvider(env, { hasClaudeCode: probes.hasCommand('claude') });
+  const hasClaudeCode = probes.hasCommand('claude');
+  // Only ask Claude Code about sign-in when its answer would matter: an API key, a
+  // custom endpoint or a cloud provider outranks it, and without the executable there
+  // is nothing to ask.
+  const off = (v: string | undefined): boolean =>
+    v === undefined || v.length === 0 || v === '0' || v.toLowerCase() === 'false';
+  const askAuth =
+    hasClaudeCode &&
+    off(env.CLAUDE_CODE_USE_BEDROCK) &&
+    off(env.CLAUDE_CODE_USE_VERTEX) &&
+    off(env.ANTHROPIC_BASE_URL) &&
+    off(env.ANTHROPIC_API_KEY);
+  const provider = describeProvider(env, {
+    hasClaudeCode,
+    claudeAuth: askAuth ? probes.claudeAuth() : null,
+  });
   if (provider.kind === 'none') {
     return {
       name: 'model access',
       status: 'warn',
       detail: `${provider.detail} — search and file reading still work without it`,
-      fix: 'Install Claude Code and sign in, set ANTHROPIC_API_KEY, or point curatorEnv.ANTHROPIC_BASE_URL at a local model',
+      fix:
+        provider.fix ??
+        'Install Claude Code and sign in, set ANTHROPIC_API_KEY, or point curatorEnv.ANTHROPIC_BASE_URL at a local model',
     };
   }
   const viaConfig = cfg !== undefined && Object.keys(cfg.curatorEnv).length > 0;
@@ -216,7 +239,7 @@ export function runChecks(configPath: string | null, probes: Probes): Check[] {
           name: 'node',
           status: 'fail',
           detail: `${probes.nodeVersion} — this needs ${MIN_NODE_MAJOR} or newer`,
-          fix: 'Install Node LTS: winget install OpenJS.NodeJS.LTS',
+          fix: 'Install Node 20 or newer: winget install OpenJS.NodeJS.LTS (Windows), brew install node (macOS), or nodejs.org',
         },
   );
 
@@ -317,7 +340,7 @@ export function runChecks(configPath: string | null, probes: Probes): Check[] {
           name: 'git',
           status: 'warn',
           detail: 'not on PATH — cloning and staleness checks need it',
-          fix: 'winget install Git.Git',
+          fix: 'winget install Git.Git (Windows), brew install git (macOS), or your package manager',
         },
   );
 

@@ -40,6 +40,36 @@ describe('describeProvider', () => {
     expect(describeProvider({ CLAUDE_CODE_USE_BEDROCK: '0' }, sub).kind).toBe('subscription');
   });
 
+  it('says "signed in" only when the auth probe says so — and names the account type, never the account', () => {
+    const p = describeProvider({}, {
+      hasClaudeCode: true,
+      claudeAuth: { loggedIn: true, authMethod: 'claude.ai', subscriptionType: 'max', email: 'someone@example.com' },
+    });
+    expect(p.kind).toBe('subscription');
+    expect(p.detail).toMatch(/signed in/i);
+    expect(p.detail).toContain('claude.ai');
+    expect(p.detail).toContain('max');
+    expect(p.detail).not.toContain('someone@example.com');
+  });
+
+  it('keeps the hedge when the probe could not run', () => {
+    const p = describeProvider({}, { hasClaudeCode: true, claudeAuth: null });
+    expect(p.kind).toBe('subscription');
+    expect(p.detail).toMatch(/if it is signed in/i);
+  });
+
+  it('reports none, with the sign-in command, when Claude Code is installed but signed out', () => {
+    const p = describeProvider({}, { hasClaudeCode: true, claudeAuth: { loggedIn: false } });
+    expect(p.kind).toBe('none');
+    expect(p.detail).toMatch(/not signed in/i);
+    expect(p.fix).toBe('claude auth login');
+  });
+
+  it('an API key still wins over a signed-in Claude Code — that is what would be billed', () => {
+    const p = describeProvider({ ANTHROPIC_API_KEY: 'sk-ant-secret' }, { hasClaudeCode: true, claudeAuth: { loggedIn: true } });
+    expect(p.kind).toBe('api-key');
+  });
+
   it('reports none when there is no Claude Code and nothing configured', () => {
     const p = describeProvider({}, { hasClaudeCode: false });
     expect(p.kind).toBe('none');
