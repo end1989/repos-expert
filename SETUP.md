@@ -94,7 +94,7 @@ Close and reopen your terminal afterwards so it picks up the new commands.
 ### 2. Get the tool ready
 
 ```powershell
-git clone <this-repo> repos-expert
+git clone https://github.com/end1989/repos-expert.git repos-expert
 cd repos-expert
 npm ci
 npm run build
@@ -140,7 +140,7 @@ Always try one before doing many, so you find problems cheaply:
 node dist/cli/index.js refresh <one-project-name>
 ```
 
-Two to four minutes later there will be four new documents under
+Two to four minutes later there will be five new documents under
 `knowledge/repos/<project>/`. Open `card.md` and read it. If it describes your project
 accurately, everything works.
 

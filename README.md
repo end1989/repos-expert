@@ -1,5 +1,10 @@
 # repos-expert
 
+[![npm version](https://img.shields.io/npm/v/repos-expert)](https://www.npmjs.com/package/repos-expert)
+[![CI](https://github.com/end1989/repos-expert/actions/workflows/ci.yml/badge.svg)](https://github.com/end1989/repos-expert/actions/workflows/ci.yml)
+[![node](https://img.shields.io/node/v/repos-expert)](package.json)
+[![license: MIT](https://img.shields.io/npm/l/repos-expert)](LICENSE)
+
 Point it at a folder of code repositories. It studies each one, writes down what it
 learned, and serves that to your AI assistant over MCP — so you can ask questions about
 any project, including how they connect to each other.
@@ -9,7 +14,8 @@ any project, including how they connect to each other.
 
 `expert init` asks where your projects are, writes your settings, and registers the tool
 with Claude Desktop. There is nothing to keep running — the client starts the server
-itself.
+itself. It also drops a short `CLAUDE.md` into your projects folder so agents working
+there know the knowledge base exists (`--skip-workspace-guide` if you'd rather it didn't).
 
 Getting projects into that folder, whichever suits you:
 
@@ -25,9 +31,11 @@ Then `expert refresh <name>` studies a project, and Claude Desktop can answer ab
 
 ## How it works
 
-`expert curate` sends a read-only Claude agent into each repository to write four
-markdown docs: what it does, how it's built, where everything lives, and what was
-recently worked on. A final pass maps the relationships between them. `expert mcp` then
+`expert curate` sends a read-only Claude agent into each repository to write five
+markdown docs: what it does (`card`), how it's built (`architecture`), where everything
+lives (`map`), what was recently worked on (`activity`), and its verified contract
+surface — routes, commands, exports, env vars, data models, each citing the file and
+line that defines it (`interfaces`). A final pass maps the relationships between them. `expert mcp` then
 serves those docs *plus* live ripgrep search and file reads over the real code, so exact
 questions are answered from the source rather than the summary. Every doc is stamped
 with the commit it was written at, and anything stale is flagged in the answer.
@@ -36,6 +44,29 @@ with the commit it was written at, and anything stale is flagged in the answer.
 GitHub account if you set `githubUser`. Both are conveniences — the folder is the source
 of truth, and copying or cloning projects in yourself works identically. Listed projects
 are updated with a fast-forward pull, so a repo you also work in never loses commits.
+
+## What it can reach, and what leaves your machine
+
+- **It reads two folders:** your projects folder (`reposDir`) and its own knowledge folder.
+  Every MCP file operation is confined to a named repo under `reposDir` — repo names are
+  validated, paths are resolved and `realpath`-checked, and anything that escapes is
+  refused. Symlinks pointing out of a repo are refused too.
+- **Results are capped** so a single tool call cannot flood the model's context: 100 search
+  matches, 2,000 lines / 200 KB per file read.
+- **No telemetry, no phoning home.** The tool itself makes no network calls. The only
+  things that leave your machine are `git`/`gh` traffic during `sync`/`add`, and — during
+  `curate`/`refresh` only — the code the curator reads, which goes to whichever model
+  provider Claude Code is signed in to (or the endpoint you configured). Serving over MCP
+  needs no model and no network at all.
+- **Subprocesses are always `execFile` with an argument array** — no shell strings, so a
+  crafted repo name or URL cannot inject commands. Clone URLs go through a transport
+  allowlist (`https`, `http`, `ssh`, `git`, `file`, `user@host:path`).
+- **The curator is a model, and models are wrong sometimes.** Its output is parsed against
+  a fixed filename allowlist so a repository containing hostile text cannot make it write
+  outside the knowledge folder, and the MCP client is told plainly that the docs are
+  summaries — when a doc and the code disagree, the code wins.
+
+See [SECURITY.md](SECURITY.md) for how to report a problem.
 
 ## What you need
 
@@ -55,7 +86,7 @@ are updated with a fast-forward pull, so a repo you also work in never loses com
 
 To hack on the tool itself:
 
-    git clone <this repo> && cd repos-expert
+    git clone https://github.com/end1989/repos-expert.git && cd repos-expert
     npm ci
     npm run build
     cp expert.config.example.json expert.config.json   # then edit reposDir
@@ -84,8 +115,10 @@ skips the question, `--dry-run` answers it without spending anything.
 From a clone, substitute `node dist/cli/index.js` for `expert`.
 
 Batches curate several repos at once — `curateConcurrency` in `expert.config.json`
-(default 4, max 16), overridable per run with `curate --concurrency <n>`. Raise it to
-finish a large backlog sooner; drop it to `1` if the API rate-limits you.
+(default 2, max 16), overridable per run with `curate --concurrency <n>`. Raise it to
+finish a large backlog sooner; above 4 the API tends to throttle, and a throttled repo
+that hits `curateTimeoutMinutes` costs double because it is retried. Drop it to `1` if
+you are being rate-limited.
 
 `refresh` with no arguments never curates repos that have no docs yet — with a large
 account that could be hours of model time. Add repos to the knowledge base explicitly:
@@ -136,22 +169,38 @@ consumes remote (HTTP) MCP servers, and this server is a local stdio process. Co
 it would mean hosting the server behind an HTTP/SSE MCP transport (or a bridge like an
 MCP remote proxy). Out of scope for now.
 
-## Moving to another computer
+## Backing up, and moving to another computer
 
-The committed `knowledge/` folder IS the knowledge base — it travels with the repo.
-`repos/` mirrors are disposable and regenerate.
+The knowledge base is one folder: `knowledgeDir` in your config, which `expert init`
+puts next to the config file (`%APPDATA%\repos-expert\knowledge` on Windows,
+`~/.config/repos-expert/knowledge` elsewhere — bare `expert` prints the exact paths).
+It is plain markdown and JSON, a few MB for dozens of repos, and it is the expensive
+part: hours of model time. `repos/` mirrors are disposable and regenerate.
 
-1. Push this project to a private GitHub repo (one-time):
-   `gh repo create repos-expert --private --source . --push`
-2. On the new machine: `gh auth login`, clone the project, then
-   `npm install && npm run build && node dist/cli/index.js sync`
-3. Register with your AI tools (section above).
-4. From then on, `expert refresh` is the only maintenance command.
+Back it up like any folder, or make it a private git repo of its own — that is what the
+author does. To move machines: install the tool, `expert init --repos-dir <folder>`,
+put the knowledge folder back where the new config points (or set `knowledgeDir` to
+wherever you keep it), then `expert sync` and `expert status`. From then on
+`expert refresh` is the only maintenance command.
+
+If you keep the list of projects in `repos.txt`, that file travels with the projects
+folder; if you set `githubUser`, `sync` re-mirrors the account on its own.
 
 ## Smoke test (spends model tokens)
 
     expert refresh <some-small-repo>
 
-Inspect `knowledge/repos/<name>/` — the four docs should read like someone actually
+Inspect `<knowledgeDir>/repos/<name>/` — the docs should read like someone actually
 explored the code, and `expert status` should show the repo `fresh`. Always do this on
 one repo before starting a large batch.
+
+## Project
+
+- [CHANGELOG.md](CHANGELOG.md) — what changed in each version; releases are also on
+  [GitHub](https://github.com/end1989/repos-expert/releases).
+- [SECURITY.md](SECURITY.md) — what the tool can and cannot reach, and how to report a
+  vulnerability.
+- [CONTRIBUTING.md](CONTRIBUTING.md) — how the code is organised and what a change needs
+  before it merges. [ARCHITECTURE.md](ARCHITECTURE.md) is the design tour.
+- MIT licensed. Windows is the verified platform; macOS and Linux are built and tested in
+  CI on every push.
