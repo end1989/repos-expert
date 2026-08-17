@@ -299,8 +299,57 @@ program
 program
   .command('mcp')
   .description('Start the MCP server on stdio (for Claude Desktop, Claude Code, Copilot, or any MCP client)')
-  .action(async () => {
-    await startMcpOrExplain(() => loadConfig());
+  .option('--http', 'serve over Streamable HTTP instead of stdio (for clients that only speak HTTP)')
+  .option('--host <host>', 'address to bind with --http (default 127.0.0.1 — loopback only)', '127.0.0.1')
+  .option('--port <n>', 'port for --http', (v: string) => Number.parseInt(v, 10), 7411)
+  .option('--token <token>', 'bearer token clients must send with --http (default: EXPERT_HTTP_TOKEN, else generated and printed once)')
+  .action(async (opts: { http?: boolean; host: string; port: number; token?: string }) => {
+    if (opts.http !== true) {
+      await startMcpOrExplain(() => loadConfig());
+      return;
+    }
+    const { startHttp, generateToken, isLoopback } = await import('../mcp/http.js');
+    const { createServer, createUnconfiguredServer } = await import('../mcp/server.js');
+    if (!Number.isInteger(opts.port) || opts.port < 0 || opts.port > 65535) {
+      console.error('--port must be an integer between 0 and 65535');
+      process.exitCode = 1;
+      return;
+    }
+    const fromEnv = process.env.EXPERT_HTTP_TOKEN;
+    const generated = opts.token === undefined && (fromEnv === undefined || fromEnv.length === 0);
+    const token = opts.token ?? (generated ? generateToken() : (fromEnv as string));
+
+    // Setup mode over HTTP too: a reachable server that explains beats a dead port.
+    let makeServer: () => ReturnType<typeof createServer>;
+    try {
+      const cfg = loadConfig();
+      makeServer = () => createServer(cfg);
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      console.error(`repos-expert: starting in setup mode. ${reason}`);
+      makeServer = () => createUnconfiguredServer(reason);
+    }
+
+    const handle = await startHttp(makeServer, { host: opts.host, port: opts.port, token });
+    // stderr, deliberately: same habit as stdio mode, and it keeps stdout scriptable.
+    console.error(`repos-expert MCP over HTTP: ${handle.url}`);
+    console.error(`  health:  ${handle.url.replace(/\/mcp$/, '/health')}`);
+    console.error(
+      generated
+        ? `  token:   ${token}   (generated for this run — pass --token or set EXPERT_HTTP_TOKEN to keep one)`
+        : `  token:   ${opts.token !== undefined ? 'from --token' : 'from EXPERT_HTTP_TOKEN'}`,
+    );
+    console.error('  clients: send "Authorization: Bearer <token>" on every request');
+    if (!isLoopback(opts.host)) {
+      console.error(
+        `  WARNING: bound to ${opts.host}, not loopback — anyone who can reach this port and has the token can read every repository in this collection. Put it behind TLS if it leaves this machine.`,
+      );
+    }
+    const stop = () => {
+      void handle.close().finally(() => process.exit(0));
+    };
+    process.on('SIGINT', stop);
+    process.on('SIGTERM', stop);
   });
 
 interface CurateOptions {
