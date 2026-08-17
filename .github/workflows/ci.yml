@@ -6,32 +6,31 @@ on:
   pull_request:
     branches: [main]
 
-jobs:
-  test-windows:
-    name: build & test (windows — verified platform)
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 20
-          cache: npm
-      - run: npm ci
-      - run: npm run build
-      - run: npx vitest run
+permissions:
+  contents: read
 
-  test-linux:
-    name: build & test (linux — advisory)
-    runs-on: ubuntu-latest
-    # The project is developed and verified on Windows; the Linux job gives
-    # cross-platform signal without blocking merges until it has a track record.
-    continue-on-error: true
+jobs:
+  test:
+    name: build & test (${{ matrix.os }}, node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # One red cell should not hide the others — a Node-24-only or macOS-only
+      # failure is exactly the signal a matrix exists to give.
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+        # 20 is the floor in package.json engines and is past end-of-life (2026-04-30);
+        # it stays here for as long as we claim to support it. 22 and 24 are the LTS
+        # lines people actually run.
+        node: [20, 22, 24]
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: ${{ matrix.node }}
           cache: npm
       - run: npm ci
       - run: npm run build
-      - run: npx vitest run
+      # `npm test` rather than `npx vitest run`: the tarball guard in tests/ packs the
+      # package for real and needs npm's execpath in the environment.
+      - run: npm test

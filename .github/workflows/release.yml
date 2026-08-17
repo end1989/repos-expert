@@ -1,0 +1,69 @@
+name: Release
+
+# Publishes to npm with provenance and cuts a GitHub Release whenever a `v*` tag is
+# pushed. Nothing here needs a stored npm token: the job authenticates to npm via
+# GitHub's OIDC token ("trusted publishing"), which is configured once on npmjs.com under
+# the package's Settings → Trusted Publisher (repository end1989/repos-expert, workflow
+# release.yml). Provenance requires the repository to be public and `repository.url` in
+# package.json to point at it — both true.
+#
+# Cut a release with:   npm version patch   &&   git push --follow-tags
+# (`npm version` bumps package.json, commits, and tags; the tag push triggers this.)
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write   # create the GitHub Release
+  id-token: write   # OIDC token for npm trusted publishing + provenance
+
+jobs:
+  publish:
+    name: publish ${{ github.ref_name }} to npm (with provenance) and GitHub Releases
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          cache: npm
+
+      # Trusted publishing needs npm >= 11.5.1; be explicit rather than trusting the
+      # runner image.
+      - run: npm install -g npm@latest
+      - run: npm --version
+
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+
+      - name: tag must match package.json version
+        run: |
+          PKG="$(node -p "require('./package.json').version")"
+          TAG="${GITHUB_REF_NAME#v}"
+          if [ "$PKG" != "$TAG" ]; then
+            echo "::error::tag v$TAG does not match package.json version $PKG"
+            exit 1
+          fi
+
+      - name: publish to npm
+        # prepublishOnly builds and tests again — that is the same safety net a manual
+        # publish gets, kept on purpose.
+        run: npm publish --provenance --access public
+
+      - name: release notes from CHANGELOG.md
+        run: |
+          node scripts/release-notes.mjs "${GITHUB_REF_NAME#v}" > release-notes.md
+          echo "--- release-notes.md ---"; cat release-notes.md
+
+      - name: GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file release-notes.md \
+            --verify-tag
