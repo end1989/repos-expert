@@ -199,11 +199,17 @@ program
   .command('doctor')
   .description('Check the setup and say what to fix — run this when something is not working')
   .action(() => {
+    const clientPath = claudeDesktopConfigPath();
     const checks = runChecks(findConfigPath(), {
       nodeVersion: process.version,
       ripgrepPath: fs.existsSync(rgPath) ? rgPath : null,
       hasCommand: onPath,
       env: process.env,
+      version,
+      clientConfig:
+        clientPath === null
+          ? null
+          : { path: clientPath, text: fs.existsSync(clientPath) ? fs.readFileSync(clientPath, 'utf8') : null },
     });
     console.log(formatDiagnosis(checks));
     if (checks.some((c) => c.status === 'fail')) process.exitCode = 1;

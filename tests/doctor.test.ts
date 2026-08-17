@@ -10,6 +10,8 @@ function probes(over: Partial<Probes> = {}): Probes {
     ripgrepPath: 'C:/rg.exe',
     hasCommand: () => true,
     env: {},
+    version: '1.2.3',
+    clientConfig: null,
     ...over,
   };
 }
@@ -146,5 +148,120 @@ describe('formatDiagnosis', () => {
     const out = formatDiagnosis(broken);
     expect(out).toMatch(/expert init/);
     expect(out.indexOf('expert init')).toBeGreaterThan(out.indexOf('config'));
+  });
+});
+
+describe('claude desktop launch check', () => {
+  const NODE = process.execPath;
+
+  /** A fake install on disk: <root>/node_modules/repos-expert/{package.json,dist/cli/index.js}. */
+  function fakeInstall(root: string, version: string): string {
+    const pkg = path.join(root, 'node_modules', 'repos-expert');
+    fs.mkdirSync(path.join(pkg, 'dist', 'cli'), { recursive: true });
+    fs.writeFileSync(path.join(pkg, 'package.json'), JSON.stringify({ name: 'repos-expert', version }));
+    fs.writeFileSync(path.join(pkg, 'dist', 'cli', 'index.js'), '');
+    return path.join(pkg, 'dist', 'cli', 'index.js');
+  }
+
+  function clientConfig(entry: unknown): { path: string; text: string | null } {
+    return {
+      path: 'C:/fake/claude_desktop_config.json',
+      text: JSON.stringify({ mcpServers: { 'repos-expert': entry } }),
+    };
+  }
+
+  it('is silent on platforms without Claude Desktop', () => {
+    const root = makeTempDir('expert-doctor-');
+    expect(runChecks(goodConfig(root), probes({ clientConfig: null })).some((c) => c.name === 'claude desktop')).toBe(false);
+  });
+
+  it('warns when Claude Desktop has no config file yet', () => {
+    const root = makeTempDir('expert-doctor-');
+    const c = find(runChecks(goodConfig(root), probes({ clientConfig: { path: 'C:/fake/x.json', text: null } })), 'claude desktop');
+    expect(c.status).toBe('warn');
+    expect(c.fix).toBe('expert init');
+  });
+
+  it('warns when the server is not registered', () => {
+    const root = makeTempDir('expert-doctor-');
+    const cfg = { path: 'C:/fake/x.json', text: JSON.stringify({ mcpServers: { other: { command: 'x' } } }) };
+    const c = find(runChecks(goodConfig(root), probes({ clientConfig: cfg })), 'claude desktop');
+    expect(c.status).toBe('warn');
+    expect(c.detail).toMatch(/not registered/);
+    expect(c.fix).toBe('expert init');
+  });
+
+  it('warns on a client config that is not JSON, and does not throw', () => {
+    const root = makeTempDir('expert-doctor-');
+    const c = find(runChecks(goodConfig(root), probes({ clientConfig: { path: 'C:/fake/x.json', text: '{ nope' } })), 'claude desktop');
+    expect(c.status).toBe('warn');
+    expect(c.detail).toMatch(/not valid JSON/);
+  });
+
+  it('passes when the client launches this very install', () => {
+    const root = makeTempDir('expert-doctor-');
+    const entry = fakeInstall(root, '1.2.3');
+    const c = find(
+      runChecks(goodConfig(root), probes({ version: '1.2.3', clientConfig: clientConfig({ command: NODE, args: [entry, 'mcp'] }) })),
+      'claude desktop',
+    );
+    expect(c.status).toBe('ok');
+    expect(c.detail).toMatch(/1\.2\.3/);
+  });
+
+  it('warns when the client would launch a different version than this CLI', () => {
+    const root = makeTempDir('expert-doctor-');
+    const entry = fakeInstall(root, '0.9.0');
+    const c = find(
+      runChecks(goodConfig(root), probes({ version: '1.2.3', clientConfig: clientConfig({ command: NODE, args: [entry, 'mcp'] }) })),
+      'claude desktop',
+    );
+    expect(c.status).toBe('warn');
+    expect(c.detail).toMatch(/0\.9\.0/);
+    expect(c.detail).toMatch(/1\.2\.3/);
+    expect(c.fix).toBe('expert init');
+  });
+
+  it('fails when the client points at a file that no longer exists — the server cannot start', () => {
+    const root = makeTempDir('expert-doctor-');
+    const gone = path.join(root, 'node_modules', 'repos-expert', 'dist', 'cli', 'index.js');
+    const c = find(
+      runChecks(goodConfig(root), probes({ clientConfig: clientConfig({ command: NODE, args: [gone, 'mcp'] }) })),
+      'claude desktop',
+    );
+    expect(c.status).toBe('fail');
+    expect(c.detail).toMatch(/no longer exists|does not exist/);
+    expect(c.fix).toBe('expert init');
+  });
+
+  it('warns on a bare npx launch — it runs whichever copy npm finds first', () => {
+    const root = makeTempDir('expert-doctor-');
+    const c = find(
+      runChecks(goodConfig(root), probes({ clientConfig: clientConfig({ command: 'npx', args: ['-y', 'repos-expert', 'mcp'] }) })),
+      'claude desktop',
+    );
+    expect(c.status).toBe('warn');
+    expect(c.detail).toMatch(/npx/);
+    expect(c.fix).toBe('expert init');
+  });
+
+  it('accepts an npx @latest launch as deliberate', () => {
+    const root = makeTempDir('expert-doctor-');
+    const c = find(
+      runChecks(goodConfig(root), probes({ clientConfig: clientConfig({ command: 'npx', args: ['-y', 'repos-expert@latest', 'mcp'] }) })),
+      'claude desktop',
+    );
+    expect(c.status).toBe('ok');
+    expect(c.detail).toMatch(/latest/);
+  });
+
+  it('does not judge a custom launch command', () => {
+    const root = makeTempDir('expert-doctor-');
+    const c = find(
+      runChecks(goodConfig(root), probes({ clientConfig: clientConfig({ command: 'docker', args: ['run', 'me'] }) })),
+      'claude desktop',
+    );
+    expect(c.status).toBe('ok');
+    expect(c.detail).toMatch(/docker/);
   });
 });

@@ -12,17 +12,32 @@ import {
 import { makeTempDir } from './helpers.js';
 
 describe('mcpLaunchCommand', () => {
-  it('uses npx when installed from npm — the package path is not stable', () => {
-    const entry = path.join('C:', 'Users', 'x', 'AppData', 'npm', 'node_modules', 'repos-expert', 'dist', 'cli', 'index.js');
-    expect(mcpLaunchCommand(entry)).toEqual({ command: 'npx', args: ['-y', 'repos-expert', 'mcp'] });
+  const NODE = 'C:\\Program Files\\nodejs\\node.exe';
+
+  it('pins a global install to its absolute path, launched by the absolute node binary', () => {
+    // A bare `npx repos-expert` runs whichever copy npm finds first and stays there;
+    // `npm update -g` replaces these files in place, so the path is the stable thing.
+    const entry = path.join('C:', 'Users', 'x', 'AppData', 'Roaming', 'npm', 'node_modules', 'repos-expert', 'dist', 'cli', 'index.js');
+    const res = mcpLaunchCommand(entry, NODE);
+    expect(res.command).toBe(NODE);
+    expect(res.args).toEqual(['C:/Users/x/AppData/Roaming/npm/node_modules/repos-expert/dist/cli/index.js', 'mcp']);
   });
 
-  it('points straight at the file when run from a clone', () => {
+  it('points straight at the file when run from a clone, with the absolute node binary', () => {
     const entry = path.join('C:', 'dev', 'repos-expert', 'dist', 'cli', 'index.js');
-    const res = mcpLaunchCommand(entry);
-    expect(res.command).toBe('node');
-    expect(res.args[1]).toBe('mcp');
-    expect(res.args[0]).toContain('dist/cli/index.js');
+    const res = mcpLaunchCommand(entry, NODE);
+    expect(res.command).toBe(NODE);
+    expect(res.args).toEqual(['C:/dev/repos-expert/dist/cli/index.js', 'mcp']);
+  });
+
+  it('falls back to npx @latest when running out of the npx cache — that path is not stable', () => {
+    const entry = path.join('C:', 'Users', 'x', 'AppData', 'Local', 'npm-cache', '_npx', 'abc123', 'node_modules', 'repos-expert', 'dist', 'cli', 'index.js');
+    expect(mcpLaunchCommand(entry, NODE)).toEqual({ command: 'npx', args: ['-y', 'repos-expert@latest', 'mcp'] });
+  });
+
+  it('accepts POSIX paths too', () => {
+    const res = mcpLaunchCommand('/usr/local/lib/node_modules/repos-expert/dist/cli/index.js', '/usr/local/bin/node');
+    expect(res).toEqual({ command: '/usr/local/bin/node', args: ['/usr/local/lib/node_modules/repos-expert/dist/cli/index.js', 'mcp'] });
   });
 });
 
@@ -101,7 +116,8 @@ describe('runInit', () => {
     expect(fs.existsSync(`${clientConfigPath}.backup`)).toBe(true);
     const client = JSON.parse(fs.readFileSync(clientConfigPath, 'utf8'));
     expect(client.mcpServers.other).toBeDefined();
-    expect(client.mcpServers['repos-expert'].command).toBe('npx');
+    expect(client.mcpServers['repos-expert'].command).toBe(process.execPath);
+    expect(client.mcpServers['repos-expert'].args).toEqual(['/tmp/node_modules/repos-expert/dist/cli/index.js', 'mcp']);
   });
 
   it('writes a workspace CLAUDE.md but never clobbers one that exists', () => {

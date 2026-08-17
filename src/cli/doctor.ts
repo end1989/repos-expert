@@ -22,6 +22,119 @@ export interface Probes {
   hasCommand(cmd: string): boolean;
   /** This process's environment; config's curatorEnv is layered on top. */
   env: EnvLike;
+  /** This CLI's own version — what the client *should* be launching. */
+  version: string;
+  /**
+   * Claude Desktop's config: where it lives and its text (null when the file does not
+   * exist). null when the platform has no Claude Desktop location at all.
+   */
+  clientConfig: { path: string; text: string | null } | null;
+}
+
+const PACKAGE_NAME = 'repos-expert';
+
+/** Version of the package that owns `file`, found by walking up to its package.json. */
+function installedVersionAbove(file: string): string | null {
+  let dir = path.dirname(path.resolve(file));
+  for (let i = 0; i < 6; i++) {
+    const pkg = path.join(dir, 'package.json');
+    if (fs.existsSync(pkg)) {
+      try {
+        const parsed = JSON.parse(fs.readFileSync(pkg, 'utf8')) as { name?: unknown; version?: unknown };
+        if (parsed.name === PACKAGE_NAME && typeof parsed.version === 'string') return parsed.version;
+      } catch {
+        return null;
+      }
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return null;
+}
+
+/**
+ * What Claude Desktop would actually start, compared with this CLI. This is the check
+ * that catches "I updated the tool but my assistant still runs the old server" — the
+ * client config points somewhere, and nothing else ever looks at where.
+ */
+export function clientLaunchCheck(probes: Probes): Check | null {
+  const client = probes.clientConfig;
+  if (client === null) return null;
+  const name = 'claude desktop';
+
+  if (client.text === null) {
+    return { name, status: 'warn', detail: `no config at ${client.path} — the server is not connected yet`, fix: 'expert init' };
+  }
+  let parsed: { mcpServers?: Record<string, { command?: unknown; args?: unknown }> };
+  try {
+    parsed = JSON.parse(client.text) as typeof parsed;
+  } catch {
+    return {
+      name,
+      status: 'warn',
+      detail: `${client.path} is not valid JSON — Claude Desktop will start no servers from it`,
+      fix: 'Fix the file by hand (there may be a .backup next to it), then: expert init',
+    };
+  }
+  const entry = parsed.mcpServers?.[PACKAGE_NAME];
+  if (entry === undefined || typeof entry.command !== 'string') {
+    return { name, status: 'warn', detail: `not registered in ${client.path}`, fix: 'expert init' };
+  }
+  const args = Array.isArray(entry.args) ? entry.args.filter((a): a is string => typeof a === 'string') : [];
+  const command = entry.command;
+  const exe = path.basename(command).toLowerCase();
+
+  if (exe === 'npx' || exe === 'npx.cmd') {
+    const spec = args.find((a) => a.startsWith(PACKAGE_NAME));
+    if (spec === undefined) {
+      return { name, status: 'ok', detail: `custom launch: ${command} ${args.join(' ')}` };
+    }
+    if (spec.includes('@')) {
+      return { name, status: 'ok', detail: `via npx ${spec} — the newest published version, resolved at each launch (needs network)` };
+    }
+    return {
+      name,
+      status: 'warn',
+      detail: `via bare "npx ${spec}", which runs whichever copy npm finds first and keeps running it — a global install stays at its version until npm update -g`,
+      fix: 'expert init',
+    };
+  }
+
+  const isNode = exe === 'node' || exe === 'node.exe';
+  const script = args[0];
+  if (!isNode || script === undefined || !/\.(c|m)?js$/i.test(script)) {
+    return { name, status: 'ok', detail: `custom launch: ${command} ${args.join(' ')}` };
+  }
+  if (!fs.existsSync(script)) {
+    return {
+      name,
+      status: 'fail',
+      detail: `points at ${script}, which no longer exists — the server cannot start`,
+      fix: 'expert init',
+    };
+  }
+  if (path.isAbsolute(command) && !fs.existsSync(command)) {
+    return {
+      name,
+      status: 'fail',
+      detail: `launches with ${command}, which no longer exists — the server cannot start`,
+      fix: 'expert init',
+    };
+  }
+  const launched = installedVersionAbove(script);
+  if (launched === null) {
+    return { name, status: 'ok', detail: `launches ${script}` };
+  }
+  if (launched !== probes.version) {
+    return {
+      name,
+      status: 'warn',
+      detail: `launches ${launched} from ${script}; this command is ${probes.version}`,
+      fix: 'expert init',
+    };
+  }
+  return { name, status: 'ok', detail: `launches this install (${launched}) — ${script}` };
 }
 
 const MIN_NODE_MAJOR = 20;
@@ -207,6 +320,11 @@ export function runChecks(configPath: string | null, probes: Probes): Check[] {
           fix: 'winget install Git.Git',
         },
   );
+
+  // Last because it is the last mile: everything above can be perfect and the
+  // assistant still runs a server from somewhere else.
+  const client = clientLaunchCheck(probes);
+  if (client !== null) checks.push(client);
 
   return checks;
 }

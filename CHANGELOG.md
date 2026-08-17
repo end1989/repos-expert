@@ -9,6 +9,27 @@ patch bumps are fixes and additive changes). Dates are npm publish dates (UTC).
 
 Nothing yet.
 
+## [0.1.10] — 2026-08-17
+
+### Fixed
+- **Claude Desktop could silently keep launching an old version.** `expert init` used to
+  register the server as a bare `npx -y repos-expert mcp`; npx runs whichever copy it
+  finds first — a global install stays at its installed version until `npm update -g`,
+  and nothing said so. `init` now writes the absolute path to your `node` and to the
+  installed `repos-expert` (offline, no PATH guesswork, and `npm update -g` is picked up
+  on the next launch). When running out of npm's npx cache, where no path is stable, it
+  writes `npx -y repos-expert@latest mcp` instead. **Existing setups: run `expert init`
+  once** (your settings are left alone; only the client entry is rewritten).
+
+### Added
+- `expert doctor` has a `claude desktop` line: which version the client would launch and
+  from where, `warn` on a version mismatch or a bare-npx entry, `fail` when the path it
+  points at no longer exists — each with `expert init` as the fix.
+- `expert init` says what the client will launch and how updates reach it.
+
+### Changed
+- README's hand-written client snippets use `repos-expert@latest`, with the reason.
+
 ## [0.1.9] — 2026-08-17
 
 ### Changed
@@ -127,7 +148,8 @@ First public release.
 - Works without GitHub: an empty folder or a failed sync degrades with guidance instead of
   failing.
 
-[Unreleased]: https://github.com/end1989/repos-expert/compare/v0.1.9...HEAD
+[Unreleased]: https://github.com/end1989/repos-expert/compare/v0.1.10...HEAD
+[0.1.10]: https://github.com/end1989/repos-expert/compare/v0.1.9...v0.1.10
 [0.1.9]: https://github.com/end1989/repos-expert/compare/v0.1.8...v0.1.9
 [0.1.8]: https://github.com/end1989/repos-expert/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/end1989/repos-expert/compare/v0.1.6...v0.1.7

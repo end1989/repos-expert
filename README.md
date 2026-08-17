@@ -127,15 +127,23 @@ error message tells you where if a crashed run leaves it behind). The lock only 
 
 ## Connect your AI tools
 
-`expert init` does the Claude Desktop case for you. The rest are the same server, so the
-config is nearly identical everywhere. Installed from npm the command is `npx`; from a
-clone it is `node <project>/dist/cli/index.js`.
+`expert init` does the Claude Desktop case for you: it writes the absolute path to your
+`node` and to the installed `repos-expert`, so the client launches exactly the copy you
+installed, offline, with no PATH guesswork — and `npm update -g repos-expert` is picked
+up on the next launch. `expert doctor` reports which version the client would launch and
+flags a mismatch, or a path that has moved (re-run `expert init` to re-point it).
+
+Everything else is the same server. If you write a config by hand, use
+`npx -y repos-expert@latest mcp` — the `@latest` matters: a bare `npx repos-expert` runs
+whichever copy npm finds first and keeps running it, so a global install silently stays at
+its installed version. From a clone the command is `node <project>/dist/cli/index.js mcp`.
 
 **Claude Code (CLI):**
 
-    claude mcp add repos-expert -- npx -y repos-expert mcp
+    claude mcp add repos-expert -- npx -y repos-expert@latest mcp
 
-**Claude Desktop:** `%APPDATA%\Claude\claude_desktop_config.json` (Windows) or
+**Claude Desktop** (what `expert init` writes, if you would rather do it by hand):
+`%APPDATA%\Claude\claude_desktop_config.json` (Windows) or
 `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS), then restart
 the app from the tray:
 
@@ -143,7 +151,7 @@ the app from the tray:
       "mcpServers": {
         "repos-expert": {
           "command": "npx",
-          "args": ["-y", "repos-expert", "mcp"]
+          "args": ["-y", "repos-expert@latest", "mcp"]
         }
       }
     }
@@ -156,7 +164,7 @@ where you want the tools (or add it to your user configuration):
         "repos-expert": {
           "type": "stdio",
           "command": "npx",
-          "args": ["-y", "repos-expert", "mcp"]
+          "args": ["-y", "repos-expert@latest", "mcp"]
         }
       }
     }

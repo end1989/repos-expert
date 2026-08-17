@@ -43,17 +43,31 @@ export function claudeDesktopConfigPath(platform: NodeJS.Platform = process.plat
 }
 
 /**
- * Installed from npm, the launch command must be `npx` — the package path is a
- * cache folder that changes. Run from a clone, point at the file directly.
+ * What the MCP client should run to start the server.
+ *
+ * Pin the client to *this* install: the absolute node binary plus the absolute path to
+ * this file. That is deterministic, works offline, needs no PATH (GUI clients on macOS
+ * famously do not inherit the shell's), and follows `npm update -g` because npm replaces
+ * the files in place. The alternative — a bare `npx repos-expert` — runs whichever copy
+ * npm finds first and keeps running it: a global install stays at its installed version
+ * for as long as nobody runs `npm update -g`, and nothing says so. `expert doctor` reports
+ * what the client would launch and flags a mismatch.
+ *
+ * The one place a path is *not* stable is npm's npx cache (`_npx/<hash>/…`, where
+ * `npx repos-expert init` runs from). There, hand the client `npx … @latest`, which
+ * re-resolves the newest published version on every launch.
  */
-export function mcpLaunchCommand(entryPoint: string): { command: string; args: string[] } {
+export function mcpLaunchCommand(
+  entryPoint: string,
+  nodeExecPath: string = process.execPath,
+): { command: string; args: string[] } {
   // Separator-agnostic on purpose: this path can arrive as a Windows path or as
   // a POSIX one from fileURLToPath, and guessing wrong writes a broken command.
   const normalized = entryPoint.replace(/\\/g, '/');
-  const installed = normalized.includes('/node_modules/') || normalized.includes('_npx');
-  return installed
-    ? { command: 'npx', args: ['-y', PACKAGE_NAME, 'mcp'] }
-    : { command: 'node', args: [normalized, 'mcp'] };
+  if (normalized.includes('_npx')) {
+    return { command: 'npx', args: ['-y', `${PACKAGE_NAME}@latest`, 'mcp'] };
+  }
+  return { command: nodeExecPath, args: [normalized, 'mcp'] };
 }
 
 /** Adds our server to a client config without disturbing anything already there. */
@@ -260,6 +274,16 @@ export function runInit(opts: InitOptions, paths: InitPaths): InitResult {
     fs.mkdirSync(path.dirname(paths.clientConfigPath), { recursive: true });
     fs.writeFileSync(paths.clientConfigPath, mergeClientConfig(existing, command, args));
     clientWritten = true;
+    if (command === 'npx') {
+      notes.push('Claude Desktop will launch the newest published version through npx (needs network at launch).');
+    } else {
+      const fromNpm = (args[0] ?? '').includes('/node_modules/');
+      notes.push(
+        `Claude Desktop will launch this install: ${args[0]}. ${
+          fromNpm ? 'npm update -g repos-expert' : 'npm run build'
+        } is picked up automatically; if you move or reinstall Node or the tool, run expert init again (expert doctor checks this).`,
+      );
+    }
     notes.push('Quit Claude Desktop from the system tray and reopen it to pick this up.');
   }
 

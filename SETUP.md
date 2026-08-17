@@ -283,3 +283,9 @@ machine.
 
 **Claude Desktop doesn't show the tools** — the path in the config must be absolute,
 and Claude Desktop must be fully restarted (quit from the tray, not just closed).
+
+**You updated, but the assistant still behaves like the old version** — the client
+launches whatever its config points at, not whatever you just installed. `expert doctor`
+has a `claude desktop` line that says which version it would launch and where from;
+`expert init` re-points it at the copy you have (your settings are left alone), then
+restart Claude Desktop from the tray.
