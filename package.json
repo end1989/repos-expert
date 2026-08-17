@@ -3,6 +3,14 @@
   "version": "0.1.7",
   "description": "Answers questions about a folder of code repositories — studies each one, writes a knowledge base, and serves it over MCP.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/end1989/repos-expert.git"
+  },
+  "homepage": "https://github.com/end1989/repos-expert#readme",
+  "bugs": {
+    "url": "https://github.com/end1989/repos-expert/issues"
+  },
   "type": "module",
   "bin": {
     "expert": "dist/cli/index.js"
