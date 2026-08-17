@@ -15,3 +15,6 @@ dist/
 
 # Playwright MCP scratch output (console logs, page snapshots) — tool artifact
 /.playwright-mcp/
+
+# Personal knowledge base written by `expert curate` — kept in its own private repo.
+/knowledge/
