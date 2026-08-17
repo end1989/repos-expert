@@ -1,6 +1,9 @@
 node_modules/
 dist/
 /repos/
+# Clones whose GitHub repo was deleted. Kept out of repos/ so `expert sync`
+# stops treating them as targets, and out of git for the same reason repos/ is.
+/repos-archived/
 .remember/
 /knowledge/.refresh.lock
 # Personal: names your GitHub account and your own folders.
@@ -9,3 +12,6 @@ dist/
 
 # npm pack output — build artifact, never source
 *.tgz
+
+# Playwright MCP scratch output (console logs, page snapshots) — tool artifact
+/.playwright-mcp/
