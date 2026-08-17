@@ -30,6 +30,7 @@
     "dist",
     "README.md",
     "SETUP.md",
+    "CHANGELOG.md",
     "expert.config.example.json"
   ],
   "scripts": {
