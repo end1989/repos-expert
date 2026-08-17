@@ -1,0 +1,26 @@
+version: 2
+updates:
+  # Runtime + dev dependencies. Grouped so a week's worth of minor/patch bumps arrives
+  # as one PR that CI validates on the full OS × Node matrix, not fifteen.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+    labels: [dependencies]
+    commit-message:
+      prefix: "chore(deps)"
+
+  # The workflows themselves (actions/checkout, actions/setup-node).
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    labels: [dependencies, ci]
+    commit-message:
+      prefix: "ci"

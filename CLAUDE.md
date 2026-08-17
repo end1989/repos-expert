@@ -63,7 +63,15 @@ will pass compilation and fail at runtime.
 
 ## Publishing
 
-`npm version patch && npm publish`. `prepublishOnly` rebuilds and runs the suite. The
-`files` allowlist in package.json is what keeps `knowledge/`, `repos/`, and a personal
-`expert.config.json` out of the tarball — verify with `npm pack --dry-run` after touching
-it. Published versions cannot practically be unpublished; `npm deprecate` is the tool.
+Move the `[Unreleased]` CHANGELOG entries under a new version heading, then
+`npm version patch && git push --follow-tags`. The tag triggers
+`.github/workflows/release.yml`, which builds, tests, publishes to npm **with provenance
+via trusted publishing** (no token anywhere), and cuts a GitHub Release from that
+CHANGELOG section. A manual `npm publish` still works but needs the 2FA browser step.
+
+`prepublishOnly` rebuilds and runs the suite, and the suite includes
+`tests/tarball.test.ts`, which packs for real and fails on anything outside the `files`
+allowlist — that test, not habit, is what keeps `knowledge/`, `repos/`, and a personal
+`expert.config.json` out of the tarball. Extend its `ALLOWED` list when you deliberately
+add a shipped file. Published versions cannot practically be unpublished; `npm deprecate`
+is the tool.
