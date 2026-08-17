@@ -64,3 +64,11 @@ describe('needsConfirmation', () => {
     expect(needsConfirmation(40, false)).toBe(false);
   });
 });
+
+describe('grammar', () => {
+  it('says "1 repo", not "1 repos"', () => {
+    expect(formatDryRun(['only'], estimateBatch(1, 2))).toMatch(/^1 repo would be studied\./);
+    expect(formatDryRun(['a', 'b'], estimateBatch(2, 2))).toMatch(/^2 repos would be studied\./);
+    expect(formatEstimate(estimateBatch(1, 2), 1)).toMatch(/^About to study 1 repo\./);
+  });
+});

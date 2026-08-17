@@ -9,6 +9,27 @@ patch bumps are fixes and additive changes). Dates are npm publish dates (UTC).
 
 Nothing yet.
 
+## [0.1.13] — 2026-08-17
+
+Findings from a fresh newcomer walk-through of 0.1.12 (clean sandbox, install from npm).
+
+### Fixed
+- **`doctor` missed the one case its sign-in probe exists for.** `claude auth status`
+  prints `{"loggedIn": false, …}` but exits 1 when signed out; the probe treated any
+  non-zero exit as "could not ask" and fell back to the hedged wording. It now reads the
+  JSON regardless of the exit code, so a signed-out Claude Code gets `warn … installed
+  but not signed in` with `claude auth login` as the fix.
+- `expert add` with a bad URL said `line 1: …` — parser wording from `repos.txt` leaking
+  into a command-line argument error. Now just the reason.
+- Batch estimates say `1 repo`, not `1 repos`.
+- Sync failures in `refresh`/`add`/`sync` output printed git's whole transcript
+  (`Cloning into…`, `remote: …`, `fatal: …`) per repo; now the decisive line only.
+- The curator's signed-out explanation names `claude auth login`.
+
+### Added
+- `expert status` shows `(code unchanged through <sha>)` next to a repo that is fresh by
+  re-verification, so it is distinguishable from one that was just studied.
+
 ## [0.1.12] — 2026-08-17
 
 ### Added
@@ -204,7 +225,8 @@ First public release.
 - Works without GitHub: an empty folder or a failed sync degrades with guidance instead of
   failing.
 
-[Unreleased]: https://github.com/end1989/repos-expert/compare/v0.1.12...HEAD
+[Unreleased]: https://github.com/end1989/repos-expert/compare/v0.1.13...HEAD
+[0.1.13]: https://github.com/end1989/repos-expert/compare/v0.1.12...v0.1.13
 [0.1.12]: https://github.com/end1989/repos-expert/compare/v0.1.11...v0.1.12
 [0.1.11]: https://github.com/end1989/repos-expert/compare/v0.1.10...v0.1.11
 [0.1.10]: https://github.com/end1989/repos-expert/compare/v0.1.9...v0.1.10

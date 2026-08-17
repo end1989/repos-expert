@@ -41,3 +41,20 @@ describe('formatStatus', () => {
     expect(out).toMatch(/expert refresh\b/);
   });
 });
+
+describe('formatStatus — verified freshness', () => {
+  it('shows through which commit a re-verified repo was confirmed', () => {
+    const out = formatStatus([
+      {
+        name: 'r',
+        path: '/repos/r',
+        currentSha: 'b'.repeat(40),
+        curatedSha: 'a'.repeat(40),
+        curatedAt: 'x',
+        verifiedThrough: 'b'.repeat(40),
+        state: 'fresh',
+      },
+    ]);
+    expect(out).toMatch(/fresh\s+r\s+head bbbbbbb\s+curated aaaaaaa\s+\(code unchanged through bbbbbbb\)/);
+  });
+});

@@ -19,7 +19,7 @@ const PATTERNS: Pattern[] = [
   {
     match: /run \/login|please log ?in|not logged ?in|invalid bearer token|oauth token (has )?expired/i,
     explain:
-      'Claude Code is installed but not signed in. Run `claude` in a terminal, sign in, then try again.',
+      'Claude Code is installed but not signed in. Run `claude auth login` (or `claude`, and sign in), then try again.',
   },
   {
     match: /credit balance is too low|insufficient (credit|quota)|quota exceeded|billing/i,

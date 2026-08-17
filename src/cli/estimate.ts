@@ -40,7 +40,7 @@ function duration(minutes: number): string {
 
 export function formatEstimate(est: Estimate, repos: number, lead?: string): string {
   return [
-    lead ?? `About to study ${repos} repos.`,
+    lead ?? `About to study ${repos} ${repos === 1 ? 'repo' : 'repos'}.`,
     `  Time:  ${duration(est.minutesLow)}–${duration(est.minutesHigh)} at this concurrency`,
     `  Cost:  roughly $${est.dollars.toFixed(0)} of model usage if you are billed per token.`,
     `         On a Claude subscription nothing is charged per repo — it draws on your allowance.`,
@@ -64,7 +64,7 @@ export function formatDryRun(names: string[], est: Estimate): string {
   const shown = names.slice(0, PREVIEW_NAMES);
   const hidden = names.length - shown.length;
   return [
-    formatEstimate(est, names.length, `${names.length} repos would be studied.`),
+    formatEstimate(est, names.length, `${names.length} ${names.length === 1 ? 'repo' : 'repos'} would be studied.`),
     '',
     'Which ones:',
     ...shown.map((n) => `  ${n}`),

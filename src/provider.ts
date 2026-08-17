@@ -35,6 +35,23 @@ export interface ClaudeAuth {
   [other: string]: unknown;
 }
 
+/**
+ * Parses what `claude auth status` printed. It prints JSON either way and exits 1 when
+ * signed out — so the caller must hand over stdout regardless of the exit code, and this
+ * returns null only when there is no usable answer in it.
+ */
+export function parseClaudeAuthOutput(stdout: string): ClaudeAuth | null {
+  const start = stdout.indexOf('{');
+  if (start < 0) return null;
+  try {
+    const parsed = JSON.parse(stdout.slice(start)) as Record<string, unknown>;
+    if (typeof parsed.loggedIn !== 'boolean') return null;
+    return parsed as unknown as ClaudeAuth;
+  } catch {
+    return null;
+  }
+}
+
 export type EnvLike = Record<string, string | undefined>;
 
 function isSet(value: string | undefined): boolean {

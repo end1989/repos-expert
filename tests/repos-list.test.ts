@@ -164,3 +164,14 @@ describe('reposListTemplate', () => {
     }
   });
 });
+
+describe('addToReposList — problem wording', () => {
+  it('does not talk about "line N" for arguments typed on a command line', () => {
+    const file = path.join(makeTempDir('expert-list-'), 'repos.txt');
+    const res = addToReposList(file, ['ext::sh -c whoami']);
+    expect(res.added).toEqual([]);
+    expect(res.problems).toHaveLength(1);
+    expect(res.problems[0]).not.toMatch(/^line \d+:/);
+    expect(res.problems[0]).toMatch(/not a git URL I will clone/);
+  });
+});

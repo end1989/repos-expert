@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { Command } from 'commander';
 import { rgPath } from '@vscode/ripgrep';
 import { formatDiagnosis, runChecks } from './doctor.js';
-import type { ClaudeAuth } from '../provider.js';
+import { parseClaudeAuthOutput, type ClaudeAuth } from '../provider.js';
 import {
   estimateBatch,
   formatDryRun,
@@ -133,7 +133,7 @@ program
     if (opts.sync !== false && res.added.length > 0) {
       const sync = await syncRepos(cfg, undefined, res.added.map((e) => e.name));
       console.log(`cloned ${sync.synced.length}, failed ${sync.failed.length}`);
-      for (const f of sync.failed) console.error(`  FAILED ${f.name}: ${f.error}`);
+      for (const f of sync.failed) console.error(`  FAILED ${f.name}: ${oneLineError(f.error)}`);
       if (sync.failed.length > 0) process.exitCode = 1;
       else if (sync.synced.length > 0) {
         console.log(`Next: expert refresh ${sync.synced.join(' ')}`);
@@ -141,6 +141,16 @@ program
     }
   });
 
+/**
+ * git's failure text is a transcript — "Cloning into…", "remote: …", "fatal: …" — and the
+ * only line worth a summary is the last fatal/error one. Keep the whole thing out of a
+ * one-line report; the user asked what failed, not for the log.
+ */
+function oneLineError(message: string): string {
+  const lines = message.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.length > 0);
+  const decisive = [...lines].reverse().find((l) => /^(fatal|error):/i.test(l));
+  return (decisive ?? lines[0] ?? message).replace(/^(fatal|error):\s*/i, '');
+}
 /**
  * Is a command installed? Looked up rather than executed — running `claude --version`
  * would need a shell on Windows, where it is a .cmd shim, and this file does not get
@@ -187,21 +197,16 @@ function claudeAuthStatus(): ClaudeAuth | null {
   } else if (/\.ps1$/i.test(found)) {
     return null;
   }
-  try {
-    const out = execFileSync(file, args, {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-      timeout: 10_000,
-      env: { ...process.env, NO_COLOR: '1' },
-    });
-    const start = out.indexOf('{');
-    if (start < 0) return null;
-    const parsed = JSON.parse(out.slice(start)) as Record<string, unknown>;
-    if (typeof parsed.loggedIn !== 'boolean') return null;
-    return parsed as unknown as ClaudeAuth;
-  } catch {
-    return null;
-  }
+  // spawnSync, not execFileSync: `claude auth status` exits 1 when signed out but still
+  // prints the JSON — an exception here would throw away exactly the answer we want.
+  const res = spawnSync(file, args, {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'ignore'],
+    timeout: 10_000,
+    env: { ...process.env, NO_COLOR: '1' },
+  });
+  if (res.error !== undefined) return null;
+  return parseClaudeAuthOutput(res.stdout ?? '');
 }
 
 /** Never throws: help is what you reach for when things are broken. */
@@ -262,7 +267,7 @@ program
     const cfg = loadConfig();
     const res = await syncRepos(cfg);
     console.log(`synced ${res.synced.length}, skipped ${res.skipped.length}, failed ${res.failed.length}`);
-    for (const f of res.failed) console.error(`  FAILED ${f.name}: ${f.error}`);
+    for (const f of res.failed) console.error(`  FAILED ${f.name}: ${oneLineError(f.error)}`);
     if (res.failed.length > 0) process.exitCode = 1;
   });
 
@@ -467,7 +472,7 @@ program
       );
     }
     for (const f of res.syncFailed) {
-      console.error(`  FAILED ${f.name}: ${f.error}`);
+      console.error(`  FAILED ${f.name}: ${oneLineError(f.error)}`);
     }
     if (res.portfolioError !== null) console.error(`  FAILED portfolio: ${res.portfolioError}`);
     if (res.syncFailed.length + res.curateFailed.length > 0 || !res.portfolioOk) {

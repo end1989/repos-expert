@@ -153,7 +153,9 @@ export function addToReposList(file: string, urls: string[]): AddResult {
     fs.writeFileSync(file, `${body}\n`);
   }
 
-  return { added, alreadyListed, problems: parsed.problems };
+  // These came from command-line arguments, not a file: "line 3" would send someone
+  // looking for a line 3.
+  return { added, alreadyListed, problems: parsed.problems.map((p) => p.replace(/^line \d+: /, '')) };
 }
 
 /** Written into a new list file so an empty list still tells you what to do with it. */

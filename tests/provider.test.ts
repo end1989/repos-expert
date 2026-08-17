@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { curatorEnvFrom, describeProvider, isValidEnvKey } from '../src/provider.js';
+import { curatorEnvFrom, describeProvider, isValidEnvKey, parseClaudeAuthOutput } from '../src/provider.js';
 
 describe('describeProvider', () => {
   const sub = { hasClaudeCode: true };
@@ -101,5 +101,23 @@ describe('isValidEnvKey', () => {
     expect(isValidEnvKey('HAS SPACE')).toBe(false);
     expect(isValidEnvKey('HAS=EQUALS')).toBe(false);
     expect(isValidEnvKey('')).toBe(false);
+  });
+});
+
+describe('parseClaudeAuthOutput', () => {
+  it('reads the JSON whatever the exit code was — signed out prints loggedIn:false and exits 1', () => {
+    expect(parseClaudeAuthOutput('{\n  "loggedIn": false,\n  "authMethod": "none",\n  "apiProvider": "firstParty"\n}\n')).toEqual({
+      loggedIn: false,
+      authMethod: 'none',
+      apiProvider: 'firstParty',
+    });
+  });
+
+  it('tolerates chatter before the JSON, and gives null for anything that is not an answer', () => {
+    expect(parseClaudeAuthOutput('Checking…\n{"loggedIn":true,"authMethod":"claude.ai"}')?.loggedIn).toBe(true);
+    expect(parseClaudeAuthOutput('')).toBeNull();
+    expect(parseClaudeAuthOutput('command not found')).toBeNull();
+    expect(parseClaudeAuthOutput('{"nope": 1}')).toBeNull();
+    expect(parseClaudeAuthOutput('{ broken')).toBeNull();
   });
 });
