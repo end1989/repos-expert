@@ -35,7 +35,10 @@ Then `expert refresh <name>` studies a project, and Claude Desktop can answer ab
 markdown docs: what it does (`card`), how it's built (`architecture`), where everything
 lives (`map`), what was recently worked on (`activity`), and its verified contract
 surface — routes, commands, exports, env vars, data models, each citing the file and
-line that defines it (`interfaces`). A final pass maps the relationships between them. `expert mcp` then
+line that defines it (`interfaces`). A final pass maps the relationships between them.
+The same documents are also exposed as MCP *resources* — `expert://portfolio`,
+`expert://cross-repo-map`, `expert://repos/{repo}/{doc}` — so a client that attaches
+context (Claude Desktop's "+" menu, VS Code) can pick a doc without a tool call. `expert mcp` then
 serves those docs *plus* live ripgrep search and file reads over the real code, so exact
 questions are answered from the source rather than the summary. Every doc is stamped
 with the commit it was written at, and anything stale is flagged in the answer.

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { McpServer, ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import type { ExpertConfig } from '../config.js';
@@ -129,7 +129,11 @@ Use the documents to orient and to answer conceptual and cross-repo questions. T
   data models). It separates what the code implements from what is only described in
   documentation — respect that distinction when you quote it.
 - If the documents and the code disagree, the code wins. Say so plainly to the user, and
-  mention that re-running \`expert refresh <repo>\` will bring the documents back in line.`;
+  mention that re-running \`expert refresh <repo>\` will bring the documents back in line.
+
+The same documents are also available as resources — expert://portfolio,
+expert://cross-repo-map, and expert://repos/{repo}/{doc} — for clients that attach
+context rather than call tools. They carry the same banners and footers.`;
 
 /**
  * What every tool says when there is no usable config. An MCP client that cannot
@@ -171,6 +175,113 @@ export function createUnconfiguredServer(reason: string): McpServer {
     );
   }
   return server;
+}
+
+/** The per-repo documents, in the order they are usually wanted. */
+export const REPO_DOCS = ['card', 'architecture', 'map', 'activity', 'interfaces'] as const;
+export type RepoDoc = (typeof REPO_DOCS)[number];
+
+const MARKDOWN = 'text/markdown';
+
+/**
+ * One repo doc, exactly as get_repo_knowledge returns it: the staleness banner, the
+ * document, and the provenance footer. Shared by the tool and the resource so a client
+ * sees the same warnings whichever way it reads.
+ */
+async function repoDocText(cfg: ExpertConfig, repo: string, doc: RepoDoc): Promise<string> {
+  const status = await requireRepo(cfg, repo);
+  const file = `${doc}.md`;
+  const content = knowledgeFile(cfg, 'repos', repo, file);
+  if (content === null) {
+    return (
+      `No curated ${file} for "${repo}" yet — run \`expert curate ${repo}\`. ` +
+      `You can still read the code directly with search_code, find_files, and read_repo_file.`
+    );
+  }
+  return stalenessBanner(status) + content + provenanceFooter(status);
+}
+
+function isRepoDoc(value: string): value is RepoDoc {
+  return (REPO_DOCS as readonly string[]).includes(value);
+}
+
+/** Template variables arrive as string | string[]; we only ever want one value. */
+function one(value: string | string[] | undefined): string {
+  return Array.isArray(value) ? (value[0] ?? '') : (value ?? '');
+}
+
+/**
+ * The same knowledge as resources, for clients that attach context rather than call
+ * tools. The list stays linear in the number of repos — portfolio, cross-repo map, and
+ * one card per repo — and the other docs are one template away, with completion.
+ */
+function registerResources(server: McpServer, cfg: ExpertConfig): void {
+  const markdown = (uri: URL, text: string) => ({ contents: [{ uri: uri.href, mimeType: MARKDOWN, text }] });
+
+  server.registerResource(
+    'portfolio',
+    'expert://portfolio',
+    {
+      title: 'Portfolio overview',
+      description: 'What repos exist, grouped by theme, and how they relate. Read first for cross-repo questions.',
+      mimeType: MARKDOWN,
+    },
+    async (uri) => {
+      const statuses = await listRepoStatuses(cfg);
+      const body =
+        knowledgeFile(cfg, 'portfolio.md') ?? '(portfolio.md not yet curated — run `expert curate --portfolio`)';
+      return markdown(uri, portfolioStalenessBanner(cfg, statuses) + body);
+    },
+  );
+
+  server.registerResource(
+    'cross-repo-map',
+    'expert://cross-repo-map',
+    {
+      title: 'Cross-repo map',
+      description: 'Which repos are actually wired together (imports, ports, shared files) versus merely similar.',
+      mimeType: MARKDOWN,
+    },
+    async (uri) =>
+      markdown(
+        uri,
+        knowledgeFile(cfg, 'cross-repo-map.md') ?? '(cross-repo-map.md not yet curated — run `expert curate --portfolio`)',
+      ),
+  );
+
+  const repoNames = async (): Promise<string[]> => (await listRepoStatuses(cfg)).map((s) => s.name);
+
+  server.registerResource(
+    'repo-doc',
+    new ResourceTemplate('expert://repos/{repo}/{doc}', {
+      list: async () => ({
+        resources: (await listRepoStatuses(cfg)).map((s) => ({
+          uri: `expert://repos/${s.name}/card`,
+          name: `${s.name} — card`,
+          description: `${cardSummary(cfg, s.name)} [${s.state}]`,
+          mimeType: MARKDOWN,
+        })),
+      }),
+      complete: {
+        repo: async (value) => (await repoNames()).filter((n) => n.startsWith(value)),
+        doc: (value) => REPO_DOCS.filter((d) => d.startsWith(value)),
+      },
+    }),
+    {
+      title: 'Repository knowledge doc',
+      description:
+        'One curated doc for one repo. doc is card | architecture | map | activity | interfaces; interfaces is the verified contract surface.',
+      mimeType: MARKDOWN,
+    },
+    async (uri, variables) => {
+      const repo = one(variables.repo);
+      const doc = one(variables.doc);
+      if (!isRepoDoc(doc)) {
+        throw new Error(`doc must be one of ${REPO_DOCS.join(', ')} — got "${doc}"`);
+      }
+      return markdown(uri, await repoDocText(cfg, repo, doc));
+    },
+  );
 }
 
 /** Every tool this server exposes; the unconfigured server mirrors the list. */
@@ -243,21 +354,10 @@ export function createServer(cfg: ExpertConfig): McpServer {
         'Curated knowledge docs for one repo. "interfaces" is the verified contract surface — routes, CLI commands, exports, env vars, data models, outbound calls — and is usually the fastest answer to "what does this expose?".',
       inputSchema: {
         repo: z.string(),
-        doc: z.enum(['card', 'architecture', 'map', 'activity', 'interfaces']).optional(),
+        doc: z.enum(REPO_DOCS).optional(),
       },
     },
-    async ({ repo, doc }) => {
-      const status = await requireRepo(cfg, repo);
-      const file = `${doc ?? 'card'}.md`;
-      const content = knowledgeFile(cfg, 'repos', repo, file);
-      if (content === null) {
-        return text(
-          `No curated ${file} for "${repo}" yet — run \`expert curate ${repo}\`. ` +
-            `You can still read the code directly with search_code, find_files, and read_repo_file.`,
-        );
-      }
-      return text(stalenessBanner(status) + content + provenanceFooter(status));
-    },
+    async ({ repo, doc }) => text(await repoDocText(cfg, repo, doc ?? 'card')),
   );
 
   server.registerTool(
@@ -316,6 +416,8 @@ export function createServer(cfg: ExpertConfig): McpServer {
       return text(stalenessBanner(status) + readFileCapped(abs, startLine, endLine));
     },
   );
+
+  registerResources(server, cfg);
 
   return server;
 }
