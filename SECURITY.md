@@ -18,7 +18,12 @@ maintenance branches.
 ## What this tool is, so you know what to worry about
 
 `repos-expert` is a **local** command-line tool and a **local MCP server over stdio**.
-There is no network service, no account, no telemetry. It:
+There is no account and no telemetry. The one network service is opt-in:
+`expert mcp --http` serves the same tools over Streamable HTTP, **loopback-only unless
+you bind elsewhere, and always behind a bearer token** — there is no unauthenticated
+mode, DNS-rebinding protection is on for loopback binds, and each request gets a fresh
+server (no sessions). If you expose it beyond the machine, the token is the only lock and
+TLS is your tunnel's job. Otherwise it:
 
 - reads two folders — your projects folder (`reposDir`) and its own knowledge folder
   (`knowledgeDir`) — and writes only to the second;
@@ -53,6 +58,10 @@ we want to hear about:
    file size — so a single tool call cannot flood the model's context.
 6. **stdout is the MCP protocol.** Nothing reachable from `expert mcp` writes to stdout
    except the transport; diagnostics go to stderr.
+7. **HTTP mode never answers without the token.** Every request to the MCP endpoint is
+   checked (constant-time compare) before a server is even constructed; a foreign
+   `Host` header on a loopback bind is refused; `/health` is the only unauthenticated
+   path and reveals only the name and version (`src/mcp/http.ts`).
 
 ## In scope
 

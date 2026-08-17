@@ -108,6 +108,8 @@ To hack on the tool itself:
     expert curate --stale      # study everything not yet studied — slow, uses the model
     expert curate --stale --dry-run   # what that would study, and cost, without doing it
     expert curate --portfolio  # redo just the cross-repo map
+    expert mcp --http          # serve over HTTP (token required) instead of stdio
+    expert --config <file> …   # any command, against a second collection
 
 `expert add` accepts the GitHub shorthand, so `expert add acme/billing-api` is the same
 as pasting the full clone URL.
@@ -125,7 +127,12 @@ you are being rate-limited.
 
 `refresh` with no arguments never curates repos that have no docs yet — with a large
 account that could be hours of model time. Add repos to the knowledge base explicitly:
-`refresh <name>`. Only one refresh can run at a time (lockfile in `knowledge/`; the
+`refresh <name>`. It also does not pay for changes that cannot move the docs: when a
+stale repo's only changes since curation are markdown, `docs/`, `.github/`, licences,
+changelogs or lockfiles (`refreshIgnore` in the config; set it to `[]` to turn this off),
+the repo is *re-verified* — recorded as unchanged in code through HEAD, no model run —
+and the docs' provenance footer says so. Naming a repo (`refresh <name>`) always studies
+it. Only one refresh can run at a time (lockfile in `knowledge/`; the
 error message tells you where if a crashed run leaves it behind). The lock only guards refresh against refresh — don't run `refresh` while a `curate --all`/`--stale` batch is active.
 
 ## Connect your AI tools
@@ -175,10 +182,34 @@ where you want the tools (or add it to your user configuration):
 Copilot lists the tools in agent mode; check VS Code's MCP docs if the setting names
 have moved.
 
-**Microsoft Copilot (M365 / Copilot Studio):** not directly connectable today — it only
-consumes remote (HTTP) MCP servers, and this server is a local stdio process. Connecting
-it would mean hosting the server behind an HTTP/SSE MCP transport (or a bridge like an
-MCP remote proxy). Out of scope for now.
+**Clients that only speak HTTP (Microsoft Copilot Studio / M365, remote setups):**
+
+    expert mcp --http                      # http://127.0.0.1:7411/mcp, token printed once
+    expert mcp --http --token <t> --port 8080
+
+Same server, Streamable HTTP transport. Loopback only unless you say `--host 0.0.0.0`
+(it warns), and a bearer token is **always** required — `--token`, `EXPERT_HTTP_TOKEN`,
+or one generated and printed to stderr at start; clients send
+`Authorization: Bearer <token>` on every request. `GET /health` answers without a token.
+Reaching it from outside the machine is your tunnel and your TLS; the token is the only
+lock, so treat it like a password. There is no session state to leak: every request
+gets a fresh server.
+
+## Several collections
+
+Work and personal repos, or a client's code you must keep apart: give each its own
+config file. `--config` is a global option, so it works on every command including
+`mcp`:
+
+    expert --config C:/work/expert.config.json init --repos-dir C:/work/repos --name Work
+    expert --config C:/work/expert.config.json status
+    expert --config C:/work/expert.config.json refresh
+
+`init` puts the knowledge base beside that config and registers a second Claude Desktop
+entry, `repos-expert-work`, that launches the server with `--config`; the default
+profile stays `repos-expert`. `expert doctor` (with or without `--config`) reports the
+entry that belongs to *that* profile. Without `--name` the label comes from the config
+file's folder.
 
 ## Backing up, and moving to another computer
 

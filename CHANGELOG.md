@@ -9,6 +9,34 @@ patch bumps are fixes and additive changes). Dates are npm publish dates (UTC).
 
 Nothing yet.
 
+## [0.1.12] — 2026-08-17
+
+### Added
+- **Several collections.** `--config <path>` is a global option on every command,
+  including `mcp`. `expert --config C:/work/expert.config.json init --repos-dir …
+  --name Work` writes that config, puts its knowledge base beside it, and registers a
+  second Claude Desktop entry `repos-expert-work` that launches the server with
+  `--config`; the default profile stays `repos-expert`. `doctor` reports the entry that
+  belongs to the active profile and names the others when this one is missing.
+- **`expert mcp --http`.** The same server over Streamable HTTP for clients that only
+  speak HTTP (Copilot Studio / M365, remote setups through a tunnel). Loopback by
+  default (`--host` to change, with a warning), **bearer token always required**
+  (`--token`, `EXPERT_HTTP_TOKEN`, or generated and printed once to stderr), stateless,
+  DNS-rebinding protection on loopback, unauthenticated `GET /health`. Setup mode works
+  over HTTP too. Nothing on stdout in either transport.
+- **Trivial-change fast path in `refresh` / `curate --stale`.** When a stale repo's only
+  changes since curation match `refreshIgnore` (default: markdown, `docs/`, `.github/`,
+  licences, changelogs, git dotfiles, lockfiles; `[]` disables), it is *re-verified*
+  instead of re-studied: meta records the code is unchanged through HEAD, status is
+  fresh, and the provenance footer says "code confirmed unchanged through <sha>" rather
+  than pretending the docs were rewritten. Unknown history counts as changed; named
+  repos always curate; `--dry-run` classifies without writing. The output line reports
+  how many were re-verified without the model.
+
+### Changed
+- `RepoStatus` gains `verifiedThrough`; `meta.json` may carry `verifiedSha`. Older
+  metas read as before.
+
 ## [0.1.11] — 2026-08-17
 
 ### Added
@@ -176,7 +204,8 @@ First public release.
 - Works without GitHub: an empty folder or a failed sync degrades with guidance instead of
   failing.
 
-[Unreleased]: https://github.com/end1989/repos-expert/compare/v0.1.11...HEAD
+[Unreleased]: https://github.com/end1989/repos-expert/compare/v0.1.12...HEAD
+[0.1.12]: https://github.com/end1989/repos-expert/compare/v0.1.11...v0.1.12
 [0.1.11]: https://github.com/end1989/repos-expert/compare/v0.1.10...v0.1.11
 [0.1.10]: https://github.com/end1989/repos-expert/compare/v0.1.9...v0.1.10
 [0.1.9]: https://github.com/end1989/repos-expert/compare/v0.1.8...v0.1.9
