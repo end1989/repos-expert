@@ -161,3 +161,47 @@ describe('runRefresh', () => {
     expect(fs.existsSync(lock)).toBe(false);
   });
 });
+
+describe('runRefresh — trivial-change fast path', () => {
+  it('re-verifies a stale repo whose only changes are docs, without calling the curator', async () => {
+    const root = makeTempDir('expert-rf-');
+    const cfg = makeCfg(root);
+    fs.mkdirSync(path.join(cfg.knowledgeDir, 'repos', 'stale1'), { recursive: true });
+    fs.writeFileSync(
+      path.join(cfg.knowledgeDir, 'repos', 'stale1', 'meta.json'),
+      JSON.stringify({ sha: 'b'.repeat(40), curatedAt: 'x', model: 'm', docVersion: 1 }),
+    );
+    const { deps, calls } = makeDeps({ changedFiles: async () => ['README.md', 'docs/guide.md'] });
+    const res = await runRefresh(cfg, undefined, deps);
+    expect(calls.curate).toEqual([]);
+    expect(res.reverified).toEqual(['stale1']);
+    expect(res.curated).toBe(0);
+    const meta = JSON.parse(fs.readFileSync(path.join(cfg.knowledgeDir, 'repos', 'stale1', 'meta.json'), 'utf8'));
+    expect(meta.verifiedSha).toBe('a'.repeat(40));
+    expect(calls.portfolio).toEqual(['yes']);
+  });
+
+  it('still curates when code changed, and when the history cannot be read', async () => {
+    const cfg = makeCfg(makeTempDir('expert-rf-'));
+    const { deps, calls } = makeDeps({ changedFiles: async () => ['src/main.py'] });
+    const res = await runRefresh(cfg, undefined, deps);
+    expect(calls.curate).toEqual(['stale1']);
+    expect(res.reverified).toEqual([]);
+
+    const cfg2 = makeCfg(makeTempDir('expert-rf-'));
+    const second = makeDeps({ changedFiles: async () => null });
+    await runRefresh(cfg2, undefined, second.deps);
+    expect(second.calls.curate).toEqual(['stale1']);
+  });
+
+  it('named repos are always curated — the fast path is for the automatic sweep only', async () => {
+    const cfg = makeCfg(makeTempDir('expert-rf-'));
+    const { deps, calls } = makeDeps({
+      changedFiles: async () => ['README.md'],
+      getStatus: async (_cfg, name) => status(name, 'stale'),
+    });
+    const res = await runRefresh(cfg, ['stale1'], deps);
+    expect(calls.curate).toEqual(['stale1']);
+    expect(res.reverified).toEqual([]);
+  });
+});

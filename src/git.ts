@@ -83,6 +83,22 @@ export async function gitLogRangeStat(dir: string, fromSha: string): Promise<str
   return stdout.trim();
 }
 
+/**
+ * Repo-relative paths (forward slashes) touched between `fromSha` and HEAD. Throws
+ * when `fromSha` is not in this history — a rewritten branch, say — so the caller
+ * treats "unknown" as "changed" rather than guessing.
+ */
+export async function changedFilesSince(dir: string, fromSha: string): Promise<string[]> {
+  if (!/^[0-9a-f]{4,40}$/i.test(fromSha)) {
+    throw new Error(`Invalid git SHA: ${fromSha}`);
+  }
+  const { stdout } = await run('git', ['diff', '--name-only', fromSha, 'HEAD', '--'], { ...OPTS, cwd: dir });
+  return stdout
+    .split(/\r?\n/)
+    .map((l) => l.trim().replace(/\\/g, '/'))
+    .filter((l) => l.length > 0);
+}
+
 export async function listBranches(dir: string): Promise<string> {
   const { stdout } = await run('git', ['branch', '-a'], { ...OPTS, cwd: dir });
   return stdout.trim();

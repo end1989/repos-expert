@@ -337,7 +337,20 @@ program
       console.log(`curated ${repoArg}`);
     } else if (opts.all || opts.stale) {
       const statuses = await listRepoStatuses(cfg);
-      const targets = opts.stale ? statuses.filter((s) => s.state !== 'fresh') : statuses;
+      let targets = opts.stale ? statuses.filter((s) => s.state !== 'fresh') : statuses;
+      if (opts.stale) {
+        // Stale only in docs/CI/lockfiles → re-verified for free, not studied again.
+        const { partitionStale } = await import('./reverify.js');
+        const split = await partitionStale(cfg, targets, undefined, opts.dryRun === true ? 'dry-run' : 'apply');
+        targets = split.curate;
+        if (split.reverified.length > 0) {
+          console.log(
+            `${split.reverified.length} unchanged in code since last studied — ${
+              opts.dryRun === true ? 'would be re-verified' : 're-verified'
+            } without the model: ${split.reverified.join(', ')}`,
+          );
+        }
+      }
       const concurrency = opts.concurrency ?? cfg.curateConcurrency;
       if (opts.dryRun === true) {
         console.log(
@@ -390,7 +403,9 @@ program
     const { runRefresh } = await import('./refresh.js');
     const res = await runRefresh(cfg, repos.length > 0 ? repos : undefined);
     console.log(
-      `sync: ${res.synced} ok, ${res.syncFailed.length} failed | curate: ${res.curated} ok, ${res.curateFailed.length} failed | portfolio: ${res.portfolioOk ? 'ok' : 'FAILED'}`,
+      `sync: ${res.synced} ok, ${res.syncFailed.length} failed | curate: ${res.curated} ok, ${res.curateFailed.length} failed${
+        res.reverified.length > 0 ? `, ${res.reverified.length} re-verified without the model` : ''
+      } | portfolio: ${res.portfolioOk ? 'ok' : 'FAILED'}`,
     );
     if (res.uncurated.length > 0) {
       console.log(

@@ -25,7 +25,47 @@ export interface ExpertConfig {
    * rather than shell variables, because a scheduled task inherits neither.
    */
   curatorEnv: Record<string, string>;
+  /**
+   * Globs (repo-relative, forward slashes) whose changes do not make docs stale. When
+   * everything that changed since curation matches, `refresh` re-verifies the repo
+   * instead of paying for a model run. An empty list turns the fast path off.
+   */
+  refreshIgnore: string[];
 }
+
+/**
+ * Paths whose changes say nothing about how the code behaves: prose, CI, licences,
+ * lockfiles. The curator's docs describe the code, and a README edit does not move it.
+ */
+export const DEFAULT_REFRESH_IGNORE: readonly string[] = [
+  '**/*.md',
+  '**/*.mdx',
+  '**/*.rst',
+  'docs/**',
+  'doc/**',
+  '.github/**',
+  'LICENSE*',
+  'LICENCE*',
+  'NOTICE*',
+  'CHANGELOG*',
+  'CONTRIBUTING*',
+  'CODE_OF_CONDUCT*',
+  'SECURITY*',
+  '.gitignore',
+  '.gitattributes',
+  '.editorconfig',
+  'package-lock.json',
+  'yarn.lock',
+  'pnpm-lock.yaml',
+  'bun.lockb',
+  'Cargo.lock',
+  'poetry.lock',
+  'uv.lock',
+  'Pipfile.lock',
+  'Gemfile.lock',
+  'go.sum',
+  'composer.lock',
+];
 
 /** Upper bound on parallel curator agents — each one spawns a CLI subprocess. */
 export const MAX_CURATE_CONCURRENCY = 16;
@@ -148,6 +188,14 @@ export function loadConfig(configPath?: string): ExpertConfig {
     }
   }
 
+  let refreshIgnore: string[] = [...DEFAULT_REFRESH_IGNORE];
+  if (raw.refreshIgnore !== undefined && raw.refreshIgnore !== null) {
+    if (!Array.isArray(raw.refreshIgnore) || raw.refreshIgnore.some((g) => typeof g !== 'string')) {
+      throw new Error('expert.config.json: "refreshIgnore" must be an array of glob strings');
+    }
+    refreshIgnore = raw.refreshIgnore as string[];
+  }
+
   const base = path.dirname(resolvedPath);
   const reposDir = path.resolve(base, merged.reposDir);
   return {
@@ -164,5 +212,6 @@ export function loadConfig(configPath?: string): ExpertConfig {
     curateConcurrency: merged.curateConcurrency,
     curateTimeoutMinutes: merged.curateTimeoutMinutes,
     curatorEnv,
+    refreshIgnore,
   };
 }

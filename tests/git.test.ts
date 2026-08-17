@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import path from 'node:path';
-import { parseRepoList, revParseHead, gitLogOneline, listBranches, listGithubRepos, gitLogRangeStat, updateMirror } from '../src/git.js';
+import { parseRepoList, revParseHead, gitLogOneline, listBranches, listGithubRepos, gitLogRangeStat, updateMirror, changedFilesSince } from '../src/git.js';
 import { makeTempDir, initGitRepo, commitFile } from './helpers.js';
 
 describe('parseRepoList', () => {
@@ -57,5 +57,26 @@ describe('input validation', () => {
     commitFile(dir, 'a.txt', 'hello');
     await expect(gitLogOneline(dir, 0)).rejects.toThrow('Limit must be a positive integer');
     await expect(gitLogOneline(dir, -5)).rejects.toThrow('Limit must be a positive integer');
+  });
+});
+
+describe('changedFilesSince', () => {
+  it('lists repo-relative paths touched since a commit, forward slashes, no ./', async () => {
+    const dir = path.join(makeTempDir('expert-git-'), 'repo');
+    initGitRepo(dir);
+    const base = commitFile(dir, 'src/a.ts', 'a', 'base');
+    commitFile(dir, 'README.md', 'r', 'docs');
+    commitFile(dir, 'src/deep/b.ts', 'b', 'code');
+    const files = await changedFilesSince(dir, base);
+    expect(files.sort()).toEqual(['README.md', 'src/deep/b.ts']);
+    expect(await changedFilesSince(dir, await revParseHead(dir))).toEqual([]);
+  });
+
+  it('rejects a malformed sha and fails on an unknown one instead of guessing', async () => {
+    const dir = path.join(makeTempDir('expert-git-'), 'repo');
+    initGitRepo(dir);
+    commitFile(dir, 'a.txt', 'a');
+    await expect(changedFilesSince(dir, 'not a sha; rm -rf')).rejects.toThrow(/Invalid git SHA/);
+    await expect(changedFilesSince(dir, 'f'.repeat(40))).rejects.toThrow();
   });
 });

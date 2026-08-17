@@ -79,7 +79,11 @@ export function noReposHint(cfg: ExpertConfig): string {
 export function provenanceFooter(status: RepoStatus): string {
   const written =
     status.curatedSha === null ? 'not yet written' : `written at ${status.curatedSha.slice(0, 7)}`;
-  return `\n\n---\nSummary ${written}; the repo is at ${status.currentSha.slice(0, 7)}. Read the source with search_code / read_repo_file on "${status.name}" to confirm anything specific.`;
+  const verified =
+    typeof status.verifiedThrough === 'string' && status.verifiedThrough !== status.curatedSha
+      ? ` (only docs, CI or lockfiles changed since — code confirmed unchanged through ${status.verifiedThrough.slice(0, 7)})`
+      : '';
+  return `\n\n---\nSummary ${written}${verified}; the repo is at ${status.currentSha.slice(0, 7)}. Read the source with search_code / read_repo_file on "${status.name}" to confirm anything specific.`;
 }
 
 function cardSummary(cfg: ExpertConfig, name: string): string {

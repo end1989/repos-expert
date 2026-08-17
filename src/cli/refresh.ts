@@ -6,6 +6,7 @@ import { curatePortfolio } from '../curator/curator.js';
 import { syncRepos, type SyncResult } from './sync.js';
 
 import { curateMany, type CurateOne, type CurateFailure } from './curate-many.js';
+import { partitionStale, type ReverifyDeps } from './reverify.js';
 
 export interface RefreshDeps {
   sync(cfg: ExpertConfig, only?: string[]): Promise<SyncResult>;
@@ -13,6 +14,8 @@ export interface RefreshDeps {
   portfolio(cfg: ExpertConfig): Promise<void>;
   listStatuses(cfg: ExpertConfig): Promise<RepoStatus[]>;
   getStatus(cfg: ExpertConfig, name: string): Promise<RepoStatus>;
+  /** Injectable for tests; the real one asks git. */
+  changedFiles?: ReverifyDeps['changedFiles'];
 }
 
 const realDeps: RefreshDeps = {
@@ -30,6 +33,8 @@ export interface RefreshResult {
   uncurated: string[];
   /** Named repos sync deliberately left alone — excluded, or archived without includeArchived. */
   skipped: string[];
+  /** Stale only in ignorable paths (docs, CI, lockfiles): re-verified, no model run. */
+  reverified: string[];
   portfolioOk: boolean;
   portfolioError: string | null;
 }
@@ -86,6 +91,7 @@ export async function runRefresh(
       curateFailed: [],
       uncurated: [],
       skipped: [],
+      reverified: [],
       portfolioOk: false,
       portfolioError: null,
     };
@@ -109,7 +115,13 @@ export async function runRefresh(
       }
     } else {
       const statuses = await deps.listStatuses(cfg);
-      targets.push(...statuses.filter((s) => s.state === 'stale'));
+      const split = await partitionStale(
+        cfg,
+        statuses.filter((s) => s.state === 'stale'),
+        deps.changedFiles !== undefined ? { changedFiles: deps.changedFiles } : undefined,
+      );
+      targets.push(...split.curate);
+      result.reverified = split.reverified;
       result.uncurated = statuses.filter((s) => s.state === 'uncurated').map((s) => s.name);
     }
 

@@ -10,6 +10,11 @@ export interface RepoMeta {
   curatedAt: string;
   model: string;
   docVersion: number;
+  /**
+   * Set by the refresh fast path: the code was unchanged (only ignorable paths moved)
+   * from `sha` through this commit, so the docs still hold without a model run.
+   */
+  verifiedSha?: string;
 }
 
 export interface RepoStatus {
@@ -18,6 +23,8 @@ export interface RepoStatus {
   currentSha: string;
   curatedSha: string | null;
   curatedAt: string | null;
+  /** When fresh only by verification: the commit the docs were confirmed to hold through. */
+  verifiedThrough: string | null;
   state: RepoState;
 }
 
@@ -41,6 +48,13 @@ export function writeMeta(knowledgeDir: string, name: string, meta: RepoMeta): v
   fs.writeFileSync(p, JSON.stringify(meta, null, 2));
 }
 
+/** Records that the docs written at meta.sha still hold at `throughSha` (code unchanged). */
+export function markVerified(knowledgeDir: string, name: string, throughSha: string): void {
+  const meta = readMeta(knowledgeDir, name);
+  if (meta === null) return;
+  writeMeta(knowledgeDir, name, { ...meta, verifiedSha: throughSha });
+}
+
 export async function getRepoStatus(cfg: ExpertConfig, name: string): Promise<RepoStatus> {
   if (!/^[A-Za-z0-9._-]+$/.test(name) || name === '.' || name === '..') {
     throw new Error(`Invalid repo name: ${name}`);
@@ -48,13 +62,16 @@ export async function getRepoStatus(cfg: ExpertConfig, name: string): Promise<Re
   const repoPath = path.join(cfg.reposDir, name);
   const currentSha = await revParseHead(repoPath);
   const meta = readMeta(cfg.knowledgeDir, name);
-  const state: RepoState = meta === null ? 'uncurated' : meta.sha === currentSha ? 'fresh' : 'stale';
+  const verified = meta !== null && meta.sha !== currentSha && meta.verifiedSha === currentSha;
+  const state: RepoState =
+    meta === null ? 'uncurated' : meta.sha === currentSha || verified ? 'fresh' : 'stale';
   return {
     name,
     path: repoPath,
     currentSha,
     curatedSha: meta?.sha ?? null,
     curatedAt: meta?.curatedAt ?? null,
+    verifiedThrough: verified ? currentSha : null,
     state,
   };
 }

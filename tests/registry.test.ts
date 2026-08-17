@@ -127,3 +127,37 @@ describe('registry', () => {
     );
   });
 });
+
+describe('verifiedSha — the refresh fast path', () => {
+  it('counts a repo as fresh when the code is unchanged through HEAD, and says through where', async () => {
+    const root = makeTempDir('expert-verified-');
+    const cfg = makeCfg(root);
+    const dir = path.join(cfg.reposDir, 'r');
+    initGitRepo(dir);
+    const first = commitFile(dir, 'src/a.ts', 'export const a = 1;\n', 'code');
+    const second = commitFile(dir, 'README.md', '# r\n', 'docs only');
+    writeMeta(cfg.knowledgeDir, 'r', { sha: first, curatedAt: '2026-08-10T00:00:00Z', model: 'm', docVersion: 1 });
+    expect((await getRepoStatus(cfg, 'r')).state).toBe('stale');
+
+    writeMeta(cfg.knowledgeDir, 'r', { sha: first, curatedAt: '2026-08-10T00:00:00Z', model: 'm', docVersion: 1, verifiedSha: second });
+    const s = await getRepoStatus(cfg, 'r');
+    expect(s.state).toBe('fresh');
+    expect(s.curatedSha).toBe(first);
+    expect(s.verifiedThrough).toBe(second);
+    expect(stalenessBanner(s)).toBe('');
+  });
+
+  it('goes stale again when the repo moves past the verified commit', async () => {
+    const root = makeTempDir('expert-verified-');
+    const cfg = makeCfg(root);
+    const dir = path.join(cfg.reposDir, 'r');
+    initGitRepo(dir);
+    const first = commitFile(dir, 'src/a.ts', 'a', 'code');
+    const second = commitFile(dir, 'README.md', 'r', 'docs');
+    writeMeta(cfg.knowledgeDir, 'r', { sha: first, curatedAt: 'x', model: 'm', docVersion: 1, verifiedSha: second });
+    commitFile(dir, 'src/b.ts', 'b', 'more code');
+    const s = await getRepoStatus(cfg, 'r');
+    expect(s.state).toBe('stale');
+    expect(s.verifiedThrough).toBeNull();
+  });
+});
