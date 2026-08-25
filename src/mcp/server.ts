@@ -174,7 +174,11 @@ export function createUnconfiguredServer(reason: string): McpServer {
   for (const name of TOOL_NAMES) {
     server.registerTool(
       name,
-      { description: 'Unavailable until repos-expert is set up — call it to see how.', inputSchema: {} },
+      {
+        description: 'Unavailable until repos-expert is set up — call it to see how.',
+        inputSchema: {},
+        annotations: READ_ONLY,
+      },
       async () => text(message),
     );
   }
@@ -288,6 +292,19 @@ function registerResources(server: McpServer, cfg: ExpertConfig): void {
   );
 }
 
+/**
+ * Every tool here reads and does nothing else: no writes, no side effects, and nothing
+ * outside the repos folder on this machine. Hosts use these hints to decide whether to
+ * warn someone before a call, so all four are stated on every tool rather than left to
+ * a default — a missing hint reads as "unknown", which is not what is true here.
+ */
+const READ_ONLY = {
+  readOnlyHint: true,
+  destructiveHint: false,
+  idempotentHint: true,
+  openWorldHint: false,
+} as const;
+
 /** Every tool this server exposes; the unconfigured server mirrors the list. */
 const TOOL_NAMES = [
   'portfolio_overview',
@@ -311,6 +328,7 @@ export function createServer(cfg: ExpertConfig): McpServer {
       description:
         'The whole portfolio: what repos exist, how they fit together, and which docs are stale.',
       inputSchema: {},
+      annotations: READ_ONLY,
     },
     async () => {
       const statuses = await listRepoStatuses(cfg);
@@ -342,6 +360,7 @@ export function createServer(cfg: ExpertConfig): McpServer {
     {
       description: 'List every repo available, with a one-line summary and whether its docs are current.',
       inputSchema: {},
+      annotations: READ_ONLY,
     },
     async () => {
       const statuses = await listRepoStatuses(cfg);
@@ -360,6 +379,7 @@ export function createServer(cfg: ExpertConfig): McpServer {
         repo: z.string(),
         doc: z.enum(REPO_DOCS).optional(),
       },
+      annotations: READ_ONLY,
     },
     async ({ repo, doc }) => text(await repoDocText(cfg, repo, doc ?? 'card')),
   );
@@ -369,6 +389,7 @@ export function createServer(cfg: ExpertConfig): McpServer {
     {
       description: 'Full-text search across all curated knowledge docs.',
       inputSchema: { query: z.string() },
+      annotations: READ_ONLY,
     },
     async ({ query }) => text(await searchText(cfg.knowledgeDir, query)),
   );
@@ -379,6 +400,7 @@ export function createServer(cfg: ExpertConfig): McpServer {
       description:
         'Search the real source code of the repos, right now. Searches all repos unless "repo" is given. "glob" filters file names (e.g. *.ts).',
       inputSchema: { query: z.string(), repo: z.string().optional(), glob: z.string().optional() },
+      annotations: READ_ONLY,
     },
     async ({ query, repo, glob }) => {
       if (repo === undefined) return text(await searchText(cfg.reposDir, query, glob));
@@ -392,6 +414,7 @@ export function createServer(cfg: ExpertConfig): McpServer {
     {
       description: 'List files matching a glob pattern, in one repo or across all of them.',
       inputSchema: { pattern: z.string(), repo: z.string().optional() },
+      annotations: READ_ONLY,
     },
     async ({ pattern, repo }) => {
       const root = repo === undefined ? cfg.reposDir : (await requireRepo(cfg, repo)).path;
@@ -410,6 +433,7 @@ export function createServer(cfg: ExpertConfig): McpServer {
         startLine: z.number().int().min(1).optional(),
         endLine: z.number().int().min(1).optional(),
       },
+      annotations: READ_ONLY,
     },
     async ({ repo, path: relPath, startLine, endLine }) => {
       const status = await requireRepo(cfg, repo);

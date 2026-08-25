@@ -7,7 +7,13 @@ patch bumps are fixes and additive changes). Dates are npm publish dates (UTC).
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+- **Tool annotations on every MCP tool.** All seven tools — and the setup-mode stand-ins
+  that mirror them — now declare `readOnlyHint: true`, `destructiveHint: false`,
+  `idempotentHint: true`, `openWorldHint: false`. Every tool reads: no writes, no side
+  effects, nothing outside the repos folder on this machine. Hosts use the hints to
+  decide whether to warn before a call, and a missing hint reads as "unknown" rather
+  than "safe". Some MCP directories reject servers where any of the four is absent.
 
 ## [0.1.13] — 2026-08-17
 
