@@ -7,6 +7,10 @@ patch bumps are fixes and additive changes). Dates are npm publish dates (UTC).
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.1.14] — 2026-08-25
+
 ### Added
 - **Tool annotations on every MCP tool.** All seven tools — and the setup-mode stand-ins
   that mirror them — now declare `readOnlyHint: true`, `destructiveHint: false`,
@@ -231,7 +235,8 @@ First public release.
 - Works without GitHub: an empty folder or a failed sync degrades with guidance instead of
   failing.
 
-[Unreleased]: https://github.com/end1989/repos-expert/compare/v0.1.13...HEAD
+[Unreleased]: https://github.com/end1989/repos-expert/compare/v0.1.14...HEAD
+[0.1.14]: https://github.com/end1989/repos-expert/compare/v0.1.13...v0.1.14
 [0.1.13]: https://github.com/end1989/repos-expert/compare/v0.1.12...v0.1.13
 [0.1.12]: https://github.com/end1989/repos-expert/compare/v0.1.11...v0.1.12
 [0.1.11]: https://github.com/end1989/repos-expert/compare/v0.1.10...v0.1.11
