@@ -400,15 +400,26 @@ program
       }
       return;
     }
-    const { curateRepo, curatePortfolio } = await import('../curator/curator.js');
-    const { curateMany } = await import('./curate-many.js');
+    // The curator (and with it the Agent SDK) is imported only where it is about to be used,
+    // so a batch dry run stays as model-free as the single-repo one above.
     let failures = 0;
 
     if (repoArg !== undefined) {
+      const { curateRepo } = await import('../curator/curator.js');
       await curateRepo(cfg, await getRepoStatus(cfg, repoArg));
       console.log(`curated ${repoArg}`);
     } else if (opts.all || opts.stale) {
       const statuses = await listRepoStatuses(cfg);
+      if (statuses.length === 0) {
+        // Not "everything is fresh": there is nothing here at all, which is a setup problem.
+        console.error(
+          fs.existsSync(cfg.reposDir)
+            ? `No git repositories found in ${cfg.reposDir}.`
+            : `The repos folder does not exist yet: ${cfg.reposDir}.`,
+        );
+        process.exitCode = 1;
+        return;
+      }
       let targets = opts.stale ? statuses.filter((s) => s.state !== 'fresh') : statuses;
       if (opts.stale) {
         // Stale only in docs/CI/lockfiles → re-verified for free, not studied again.
@@ -447,6 +458,7 @@ program
         }
         console.log(`\ncurating ${targets.length} repos, ${concurrency} at a time`);
       }
+      const { curateMany } = await import('./curate-many.js');
       failures += (await curateMany(cfg, targets, undefined, concurrency)).length;
     } else if (!opts.portfolio) {
       console.error('Specify a repo, --all, --stale, or --portfolio.');
@@ -456,6 +468,7 @@ program
 
     if (opts.all || opts.stale || opts.portfolio) {
       try {
+        const { curatePortfolio } = await import('../curator/curator.js');
         await curatePortfolio(cfg);
         console.log('curated portfolio');
       } catch (err) {
