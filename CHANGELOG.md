@@ -14,6 +14,11 @@ patch bumps are fixes and additive changes). Dates are npm publish dates (UTC).
   name or `--portfolio`, it was silently ignored and the curator ran — spending model
   usage the flag promised not to. Both forms now answer before the curator or the Agent
   SDK is loaded, and an unknown repo name still fails.
+- `expert curate --all --dry-run` and `--stale --dry-run` no longer load the curator or the
+  Agent SDK at all; they are now as model-free as the single-repo dry run.
+- `expert curate --all` / `--stale` with no repos to study now says "No git repositories
+  found in …" (or that the repos folder does not exist) and exits non-zero, instead of
+  reporting "Nothing to curate — everything is fresh" and then running the portfolio pass.
 - `parseCuratedDocs` now keeps only the expected filenames. A `===FILE: ../evil.md===`
   marker echoed from a studied repository could never be written — the write loops only
   use the fixed filename list — but the parser returned it, so that safety depended on
