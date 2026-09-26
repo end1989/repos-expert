@@ -82,6 +82,19 @@ describe('expert curate --dry-run', () => {
     expect(fs.existsSync(path.join(run.knowledgeDir, 'portfolio.md'))).toBe(false);
   });
 
+  it('for a named repo alongside --all or --stale: still a dry run, and names the portfolio pass that would follow', () => {
+    // Commander accepts `curate alpha --all`; a real run curates alpha, then the portfolio.
+    for (const batchFlag of ['--all', '--stale']) {
+      const run = runCurate(['alpha', batchFlag, '--dry-run']);
+      expect(run.status, `${batchFlag}: ${run.stderr}`).toBe(0);
+      expect(run.stdout).toContain('alpha');
+      expect(run.stdout).toMatch(/portfolio/i);
+      expect(run.stdout).toMatch(/nothing (was )?(spent|studied)/i);
+      expect(curatorLoads(run.loaded), batchFlag).toEqual([]);
+      expect(fs.existsSync(path.join(run.knowledgeDir, 'repos', 'alpha')), batchFlag).toBe(false);
+    }
+  });
+
   it('for a repo that does not exist: fails, without loading the curator', () => {
     const run = runCurate(['no-such-repo', '--dry-run']);
     expect(run.status).not.toBe(0);

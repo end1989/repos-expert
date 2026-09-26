@@ -384,13 +384,15 @@ program
     const cfg = loadConfig();
     // A dry run of a named repo or of the portfolio pass is answered before the curator
     // (and the Agent SDK) is even imported: "without doing it" means no model call.
+    // A named repo always takes this path, even alongside --all/--stale (commander accepts
+    // the combination, and a real run then curates the repo and the portfolio).
     // The batch forms handle --dry-run below, after working out what is stale.
-    if (opts.dryRun === true && !opts.all && !opts.stale && (repoArg !== undefined || opts.portfolio)) {
+    if (opts.dryRun === true && (repoArg !== undefined || (opts.portfolio && !opts.all && !opts.stale))) {
       if (repoArg !== undefined) {
         await getRepoStatus(cfg, repoArg); // an unknown or invalid name fails here, as it would for real
         console.log(formatDryRun([repoArg], estimateBatch(1, 1)));
       }
-      if (opts.portfolio) {
+      if (opts.portfolio || opts.all || opts.stale) {
         console.log(
           'The portfolio pass would rewrite portfolio.md and cross-repo-map.md.\n' +
             'Dry run — nothing was studied and nothing was spent. Drop --dry-run to go ahead.',
