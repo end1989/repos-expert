@@ -7,7 +7,17 @@ patch bumps are fixes and additive changes). Dates are npm publish dates (UTC).
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+
+- `expert curate <repo> --dry-run` and `expert curate --portfolio --dry-run` now actually
+  dry-run. Previously `--dry-run` was only honoured with `--all`/`--stale`; given a repo
+  name or `--portfolio`, it was silently ignored and the curator ran — spending model
+  usage the flag promised not to. Both forms now answer before the curator or the Agent
+  SDK is loaded, and an unknown repo name still fails.
+- `parseCuratedDocs` now keeps only the expected filenames. A `===FILE: ../evil.md===`
+  marker echoed from a studied repository could never be written — the write loops only
+  use the fixed filename list — but the parser returned it, so that safety depended on
+  every caller. The parser now enforces the allowlist itself, as the docs already said.
 
 ## [0.1.14] — 2026-08-25
 

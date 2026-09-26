@@ -21,6 +21,22 @@ describe('parseCuratedDocs', () => {
     expect(docs['architecture.md']).toBe('# arch');
   });
 
+  it('returns only the expected filenames, dropping any other marker the output contains', () => {
+    // A studied repo can contain `===FILE: ../evil.md===` in its source, and the model may
+    // echo it. The parser itself must refuse it, not rely on every caller to ignore it.
+    const output = [
+      '===FILE: card.md===',
+      '# card',
+      '===FILE: ../evil.md===',
+      'pwned',
+      '===FILE: notes.md===',
+      'extra',
+    ].join('\n');
+    const docs = parseCuratedDocs(output, ['card.md']);
+    expect(Object.keys(docs)).toEqual(['card.md']);
+    expect(docs['card.md']).toBe('# card');
+  });
+
   it('throws listing every missing or empty doc', () => {
     const output = '===FILE: card.md===\n# card\n===FILE: map.md===\n\n';
     expect(() => parseCuratedDocs(output, DOC_FILES)).toThrow(
