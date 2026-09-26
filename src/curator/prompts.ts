@@ -120,8 +120,11 @@ export function parseCuratedDocs(
   while ((m = re.exec(output)) !== null) {
     markers.push({ name: m[1].trim(), contentStart: m.index + m[0].length });
   }
+  // Every marker still bounds the doc before it, but only allowlisted names are kept: a
+  // studied repo can contain `===FILE: ../evil.md===`, and the model may echo it.
   const docs: Record<string, string> = {};
   markers.forEach((marker, i) => {
+    if (!expected.includes(marker.name)) return;
     const next = markers[i + 1];
     const end = next === undefined ? output.length : output.lastIndexOf('===FILE:', next.contentStart);
     docs[marker.name] = output.slice(marker.contentStart, end).trim();
