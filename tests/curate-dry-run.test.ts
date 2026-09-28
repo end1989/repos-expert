@@ -25,13 +25,18 @@ interface Run {
   knowledgeDir: string;
 }
 
-function runCurate(args: string[]): Run {
+function runCurate(args: string[], repos: 'alpha' | 'empty' | 'absent' = 'alpha'): Run {
   const tmp = makeTempDir('expert-dryrun-');
   const trace = path.join(tmp, 'trace.txt');
   fs.writeFileSync(trace, '');
-  const alpha = path.join(tmp, 'repos', 'alpha');
-  initGitRepo(alpha);
-  commitFile(alpha, 'index.js', 'module.exports = 1;\n');
+  if (repos === 'alpha') {
+    const alpha = path.join(tmp, 'repos', 'alpha');
+    initGitRepo(alpha);
+    commitFile(alpha, 'index.js', 'module.exports = 1;\n');
+  } else if (repos === 'empty') {
+    // A repos folder holding only a directory that is not a git repo.
+    fs.mkdirSync(path.join(tmp, 'repos', 'not-a-repo'), { recursive: true });
+  }
   const configPath = path.join(tmp, 'expert.config.json');
   fs.writeFileSync(configPath, JSON.stringify({ reposDir: './repos', knowledgeDir: './knowledge' }));
 
@@ -92,6 +97,31 @@ describe('expert curate --dry-run', () => {
       expect(run.stdout).toMatch(/nothing (was )?(spent|studied)/i);
       expect(curatorLoads(run.loaded), batchFlag).toEqual([]);
       expect(fs.existsSync(path.join(run.knowledgeDir, 'repos', 'alpha')), batchFlag).toBe(false);
+    }
+  });
+
+  it('for the batch forms: lists what it would study without ever loading the curator', () => {
+    for (const batchFlag of ['--all', '--stale']) {
+      const run = runCurate([batchFlag, '--dry-run']);
+      expect(run.status, `${batchFlag}: ${run.stderr}`).toBe(0);
+      expect(run.stdout, batchFlag).toContain('alpha');
+      expect(curatorLoads(run.loaded), batchFlag).toEqual([]);
+    }
+  });
+
+  it('with no repos to look at: says so and fails, instead of calling everything fresh', () => {
+    for (const [repos, message] of [
+      ['empty', /no git repositories found/i],
+      ['absent', /repos folder does not exist/i],
+    ] as const) {
+      for (const batchFlag of ['--all', '--stale']) {
+        const run = runCurate([batchFlag, '--dry-run'], repos);
+        const label = `${repos} ${batchFlag}`;
+        expect(run.status, label).not.toBe(0);
+        expect(run.stdout + run.stderr, label).toMatch(message);
+        expect(run.stdout, label).not.toMatch(/everything is fresh/i);
+        expect(curatorLoads(run.loaded), label).toEqual([]);
+      }
     }
   });
 
