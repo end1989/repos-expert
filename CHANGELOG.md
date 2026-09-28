@@ -9,6 +9,9 @@ patch bumps are fixes and additive changes). Dates are npm publish dates (UTC).
 
 ### Fixed
 
+- CI on `main` is green again: the vitest 5 bump is reverted to vitest 4. vitest 5 requires
+  Node ^22.12 and no longer installs `vite`, so `npm test` failed at startup, and it would
+  have dropped the Node 20 this package declares. Dependabot now skips vitest major bumps.
 - `expert curate <repo> --dry-run` and `expert curate --portfolio --dry-run` now actually
   dry-run. Previously `--dry-run` was only honoured with `--all`/`--stale`; given a repo
   name or `--portfolio`, it was silently ignored and the curator ran — spending model
