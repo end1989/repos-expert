@@ -136,15 +136,18 @@ function everyReading(glob: string): string[] {
  * Whether a piece uses syntax that ripgrep and this check could read differently. The
  * runtime's ripgrep (14.1) drops a `}` that closes nothing, so `.gi}t` is `.git`; a [class]
  * holding `/` is one character to ripgrep (`[.-/]git` is `.git`) but is split at the slash
- * here, and one holding `,`, `{` or `}` is split or grouped differently; versions disagree on
- * an unclosed `{` or `[`. No glob anyone means needs any of it. (Nested groups are left to
- * the matcher, which refuses them with its own reason.)
+ * here, and one holding `,`, `{` or `}` is split or grouped differently; after a negation,
+ * ripgrep reads the first `]` as a member (`[!]]` is "not ]", so `.gi[!]]` is `.git`) where
+ * this matcher closes the class; versions disagree on an unclosed `{` or `[`. No glob anyone
+ * means needs any of it. (Nested groups are left to the matcher, which refuses them with its
+ * own reason.)
  */
 function readsAmbiguously(piece: string): boolean {
   let depth = 0;
   for (let i = 0; i < piece.length; i++) {
     const c = piece[i];
     if (c === '[') {
+      if (['!]', '^]'].includes(piece.slice(i + 1, i + 3))) return true;
       const end = piece.indexOf(']', i + 2);
       if (end === -1 || /[/\\,{}[]/.test(piece.slice(i + 1, end))) return true;
       i = end;
@@ -172,7 +175,7 @@ function grepGlobProblem(given: string): string | null {
     return `the pattern "${given}" contains "\\", which ripgrep reads as an escape, not a folder separator: write folders with "/"`;
   }
   if (piecesForRipgrep(given).some(readsAmbiguously)) {
-    return `the pattern "${given}" has a } that closes nothing, an unclosed { or [, or a [...] holding / , { or }, which ripgrep and this check could read differently`;
+    return `the pattern "${given}" has a } that closes nothing, an unclosed { or [, a [...] holding / , { or }, or one opening with !] or ^], which ripgrep and this check could read differently`;
   }
   for (const piece of everyReading(given)) {
     const unreadable = unreadableGlob(piece);

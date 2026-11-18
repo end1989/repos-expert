@@ -125,6 +125,9 @@ const OPENERS = [
   '[av]*/**',
   '**/lib/**',
   '{*/*/.gi?,*/*/.gi?/**}',
+  '.gi[!]]',
+  '.gi[^]]',
+  '.gi[!]x]',
 ];
 const PICKERS = [
   'config',
@@ -139,6 +142,8 @@ const PICKERS = [
   'vendor/*/*/*',
   '.gi[t/]/*',
   '*/*/.gi?/**',
+  '.gi[!]]/conf?g',
+  '.gi[^]]/conf?g',
 ];
 
 /** Globs a curator writes, which must stay allowed. */

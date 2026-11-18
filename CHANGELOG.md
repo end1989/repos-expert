@@ -25,7 +25,8 @@ patch bumps are fixes and additive changes). Dates are npm publish dates (UTC).
   config excludes. A Grep glob is judged in the pieces the runtime hands ripgrep, `{…}`
   words whole. Syntax that ripgrep could read differently from the hook is refused: a
   backslash, which ripgrep reads as an escape; a `}` that closes nothing, which the
-  runtime's ripgrep drops (`.gi}t` is `.git` to it); a `[class]` holding `/`. An absolute
+  runtime's ripgrep drops (`.gi}t` is `.git` to it); a `[class]` holding `/`, or opening
+  with `!]` or `^]`, where ripgrep reads that `]` as a member (`.gi[!]]` is `.git`). An absolute
   Glob pattern is judged by the folder the runtime lists, the text before its first
   wildcard trimmed as the runtime trims it, so `<repo>/.. /*` cannot list the repository's
   parent. Each refusal is unit-tested (`tests/confine.test.ts`). The Grep-glob rule is also

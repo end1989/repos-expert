@@ -231,6 +231,10 @@ describe('checkToolCall — what the curator may touch', () => {
       '.gi}t .gi}t/conf?g',
       '[.-/]git [.-/]git/conf?g',
       '.gi[t/] .gi[t/]/*',
+      // After a negation, ripgrep reads the first ] as a member: "[!]]" is "not ]".
+      '.gi[!]] .gi[!]]/conf?g',
+      '.gi[^]] .gi[^]]/conf?g',
+      '.gi[!]x] .gi[!]x]/conf?g',
       '{src',
       'src/[ab',
       '[,]x',
