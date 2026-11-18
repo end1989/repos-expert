@@ -124,6 +124,13 @@ describe('buildAgentOptions — the privileges a curator session starts with', (
     expect(options.strictMcpConfig).toBe(true);
   });
 
+  it('keeps the runtime default system prompt, which leaves out its git status', () => {
+    // Unset, the SDK sends an empty custom prompt, and the runtime omits its git-status
+    // snapshot. The claude_code preset adds it to every request: commit subjects, branch
+    // names and the repository's git user name, a personal identifier.
+    expect(options.systemPrompt).toBeUndefined();
+  });
+
   it('delivers the prompt as written, so an @path in a commit message attaches nothing', () => {
     // The runtime reads "@path" in a prompt as a file to attach before the first turn, and
     // no PreToolUse hook sees that read. The prompt carries commit subjects, branch names and
