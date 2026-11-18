@@ -28,8 +28,25 @@ import { CuratorError } from './errors.js';
  *   repository — commit subjects, branch names, earlier documents, manifests — and the
  *   runtime would otherwise read an `@path` in it as a file to attach before the first
  *   turn, a read no hook sees.
+ * - `autoMemoryEnabled: false`: the runtime reads the operator's auto-memory for the
+ *   working folder even with no settings loaded, as instructions that override its
+ *   defaults.
+ * - The environment is the operator's, which carries their sign-in and provider, without
+ *   their ripgrep config (see runtimeEnv).
  * - A PreToolUse hook confines the three read tools to the repository (see confine.ts).
  */
+
+/**
+ * The operator's environment, minus what would change what the curator's tools see. With
+ * USE_BUILTIN_RIPGREP=0 the runtime runs the system ripgrep without --no-config, so
+ * RIPGREP_CONFIG_PATH's options apply: `--follow` made Glob list the files behind a link
+ * out of the repository.
+ */
+function runtimeEnv(env: EnvLike): EnvLike {
+  const copy = { ...env };
+  delete copy.RIPGREP_CONFIG_PATH;
+  return copy;
+}
 
 export interface RunOpts {
   /** The repository to study; the agent cannot read outside it. */
@@ -65,7 +82,7 @@ export function buildAgentOptions(
   return {
     cwd: opts.cwd,
     model: opts.model,
-    env: opts.env,
+    env: runtimeEnv(opts.env),
     tools: [...CURATOR_TOOLS],
     allowedTools: [...CURATOR_TOOLS],
     permissionMode: 'dontAsk',
@@ -73,6 +90,7 @@ export function buildAgentOptions(
     mcpServers: {},
     strictMcpConfig: true,
     verbatimPrompts: true,
+    settings: { autoMemoryEnabled: false },
     hooks: {
       PreToolUse: [{ hooks: [confineToRepo(opts.cwd, onDenied, opts.excludeRepos ?? [])] }],
     },

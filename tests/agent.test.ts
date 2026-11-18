@@ -124,6 +124,23 @@ describe('buildAgentOptions — the privileges a curator session starts with', (
     expect(options.strictMcpConfig).toBe(true);
   });
 
+  it("loads none of the operator's auto-memory, which the runtime reads even with no settings", () => {
+    // The runtime reads <config>/projects/<cwd>/memory/MEMORY.md as instructions that
+    // override its defaults: the operator's notes about the repos folder, sent with
+    // every request and able to steer what the curator writes.
+    expect(options.settings).toEqual({ autoMemoryEnabled: false });
+  });
+
+  it("hands the runtime the operator's environment without their ripgrep config", () => {
+    // With USE_BUILTIN_RIPGREP=0 the runtime runs the system ripgrep with no --no-config,
+    // so RIPGREP_CONFIG_PATH's options apply: --follow made Glob list files behind a link
+    // out of the repository.
+    const env = { PATH: 'x', RIPGREP_CONFIG_PATH: '/home/me/.ripgreprc', ANTHROPIC_API_KEY: 'k' };
+    const built = buildAgentOptions(runOpts({ env }), new AbortController());
+    expect(built.env).toEqual({ PATH: 'x', ANTHROPIC_API_KEY: 'k' });
+    expect(env.RIPGREP_CONFIG_PATH).toBe('/home/me/.ripgreprc'); // the caller's object is untouched
+  });
+
   it('keeps the runtime default system prompt, which leaves out its git status', () => {
     // Unset, the SDK sends an empty custom prompt, and the runtime omits its git-status
     // snapshot. The claude_code preset adds it to every request: commit subjects, branch
