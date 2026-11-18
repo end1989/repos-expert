@@ -1,7 +1,7 @@
 import path from 'node:path';
 import type { HookCallback } from '@anthropic-ai/claude-agent-sdk';
 import { isDriveRelative, isInside, namesGitDir, resolveReal } from '../paths.js';
-import { matchesGlob } from '../glob.js';
+import { couldMatchFolder, globProblem as unreadableGlob, matchesGlob } from '../glob.js';
 
 /**
  * The curator's reach, enforced in code rather than requested in the prompt.
@@ -108,20 +108,47 @@ const GLOB_MAGIC = /[*?[{]/;
 const GIT_PROBES = ['.git', '.git/config', 'sub/.git/config'];
 
 /**
- * Whether a Grep glob would bring .git back into the search. The runtime passes ripgrep
- * `--glob !.git` and then the caller's globs, split on spaces and commas, and in ripgrep the
- * later glob wins: `*` alone re-includes .git/config. A glob the matcher cannot read is
- * treated as reaching it.
+ * The pieces a Grep glob reaches ripgrep as. The runtime splits it on whitespace, keeps a
+ * word holding both `{` and `}` whole, splits every other word on commas, and passes each
+ * piece as its own `--glob`. The glob is also read whole, by whitespace alone, and by
+ * whitespace and every comma, so a runtime that split it another way would meet a refusal
+ * too. A piece starting with `!` only excludes, so it cannot bring anything back.
  */
-function reachesGitDir(glob: string): boolean {
-  const pieces = [glob, ...glob.split(/[\s,]+/)].filter((g) => g.length > 0 && !g.startsWith('!'));
-  return pieces.some((g) => {
-    try {
-      return GIT_PROBES.some((probe) => matchesGlob(g, probe));
-    } catch {
-      return true;
+function grepGlobPieces(glob: string): string[] {
+  const words = glob.split(/\s+/);
+  const asTheRuntimeSplitsIt = words.flatMap((word) =>
+    word.includes('{') && word.includes('}') ? [word] : word.split(','),
+  );
+  const readings = [glob, ...words, ...glob.split(/[\s,]+/), ...asTheRuntimeSplitsIt];
+  return [...new Set(readings)].filter((piece) => piece.length > 0 && !piece.startsWith('!'));
+}
+
+/**
+ * Why a Grep glob could bring .git back into the search, or null. The runtime passes ripgrep
+ * `--glob !.git` and then the caller's pieces, and in ripgrep the later glob wins: a piece
+ * that matches a folder named .git, at any depth, lets the search into it — `*`, `{.git,x}`,
+ * and `vendor/**`, which opens vendor/lib/.git. A backslash is an escape to ripgrep (`.gi\t`
+ * is `.git`) but a folder separator to this matcher, so a glob holding one is refused rather
+ * than misjudged; so is a piece this matcher cannot read.
+ */
+function grepGlobProblem(given: string): string | null {
+  // As written: the runtime hands a Grep glob to ripgrep without trimming or expanding it.
+  if (given.includes('\\')) {
+    return `the pattern "${given}" contains "\\", which ripgrep reads as an escape, not a folder separator: write folders with "/"`;
+  }
+  for (const piece of grepGlobPieces(given)) {
+    const unreadable = unreadableGlob(piece);
+    if (unreadable !== null) return `the pattern "${given}" cannot be checked: ${unreadable}`;
+    if (
+      // A leading drive's colon is not a stream name, as in globProblem.
+      namesGitDir(piece.replace(/^[A-Za-z]:(?=\/|$)/, '')) ||
+      couldMatchFolder(piece, '.git') ||
+      GIT_PROBES.some((probe) => matchesGlob(piece, probe))
+    ) {
+      return `the pattern "${given}" could let the search into a .git folder, which is not part of the source. To search a whole folder, give it as the path`;
     }
-  });
+  }
+  return null;
 }
 
 /**
@@ -143,8 +170,12 @@ function globProblem(
   if (segments.includes('..')) return outside;
   // A leading drive ("C:") is not a stream name; every other segment is checked.
   const tail = /^[A-Za-z]:$/.test(segments[0] ?? '') ? segments.slice(1) : segments;
-  if (namesGitDir(tail.join('/')) || (tool === 'Grep' && reachesGitDir(glob))) {
+  if (namesGitDir(tail.join('/'))) {
     return `the pattern "${given}" reaches into .git, which is not part of the source`;
+  }
+  if (tool === 'Grep') {
+    const problem = grepGlobProblem(given);
+    if (problem !== null) return problem;
   }
   if (!path.isAbsolute(glob)) return null;
   const fixed: string[] = [];

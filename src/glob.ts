@@ -221,6 +221,19 @@ export function matchesGlob(pattern: string, relPath: string): boolean {
   return compile(pattern).alternatives.some((alt) => matchSegments(alt, path));
 }
 
+/**
+ * Whether `pattern` could match some path whose last segment is `name`, wherever that path
+ * is. In ripgrep a glob that matches a folder lets the search into it, so this judges a glob
+ * by the folders it could open. A trailing `**` matches whatever lies beneath, so it always
+ * could. Throws, like `matchesGlob`, on a pattern `globProblem` reports.
+ */
+export function couldMatchFolder(pattern: string, name: string): boolean {
+  return compile(pattern).alternatives.some((alt) => {
+    const last = alt.at(-1);
+    return last === '**' || (last !== undefined && matchSegment(last, name));
+  });
+}
+
 export function matchesAnyGlob(relPath: string, patterns: readonly string[]): boolean {
   return patterns.some((g) => matchesGlob(g, relPath));
 }

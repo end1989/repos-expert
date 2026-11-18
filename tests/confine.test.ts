@@ -100,6 +100,8 @@ describe('checkToolCall — what the curator may touch', () => {
   it('accepts an absolute glob that stays inside the repository', () => {
     const inside = `${repo.replace(/\\/g, '/')}/src/**/*.ts`;
     expect(checkToolCall(repo, 'Glob', { pattern: inside })).toEqual({ allowed: true });
+    // A drive letter's colon is not a stream name, in a Grep glob either.
+    expect(checkToolCall(repo, 'Grep', { pattern: 'x', glob: inside })).toEqual({ allowed: true });
   });
 
   it('keeps the agent out of .git, where a remote URL can carry a token into the docs', () => {
@@ -151,6 +153,59 @@ describe('checkToolCall — what the curator may touch', () => {
         allowed: true,
       });
     }
+  });
+
+  it('reads a Grep glob in the pieces the runtime hands ripgrep, keeping {…} words whole', () => {
+    // The runtime splits on whitespace, keeps a word holding both { and } whole, and splits
+    // only the other words on commas. Split on every comma, "{.git,x}" looks like two harmless
+    // halves; ripgrep gets it whole, and it lets .git back in.
+    for (const glob of ['{.git,x} {config,y}', '{.gi,x}t c{o,x}nfig', 'src/*.ts {.git,x}']) {
+      expect(checkToolCall(repo, 'Grep', { pattern: 'url', glob }).allowed, glob).toBe(false);
+    }
+  });
+
+  it('refuses a backslash in a Grep glob, which ripgrep reads as an escape, not a folder', () => {
+    // ".gi\t" is ".git" to ripgrep; read as a folder separator it looked like ".gi/t".
+    for (const glob of ['.gi\\t c\\onfig', '.\\git c\\onfig', 'src\\**\\*.ts']) {
+      const decision = checkToolCall(repo, 'Grep', { pattern: 'url', glob });
+      expect(decision.allowed, glob).toBe(false);
+      expect(decision.allowed ? '' : decision.reason, glob).toMatch(/escape/);
+    }
+  });
+
+  it('refuses a Grep glob that would let ripgrep into a .git folder at any depth', () => {
+    // A glob that matches a folder named .git, wherever it is, outranks the runtime's
+    // --glob !.git: "vendor/**" opens vendor/lib/.git, "*/" opens every folder.
+    for (const glob of ['vendor/**', 'vendor/** config', '*/ config', '**', 'src/**']) {
+      expect(checkToolCall(repo, 'Grep', { pattern: 'url', glob }).allowed, glob).toBe(false);
+    }
+    const decision = checkToolCall(repo, 'Grep', { pattern: 'url', glob: 'src/**' });
+    expect(decision.allowed ? '' : decision.reason).toMatch(/as the path/);
+  });
+
+  it('still allows the Grep globs a curator actually writes', () => {
+    const everyday = [
+      '*.ts',
+      '*.{ts,tsx}',
+      'src/**/*.ts',
+      '**/*.md',
+      '!*.md',
+      '{src,lib}/**/*.js',
+      '*.test.ts *.spec.ts',
+      'docs/*.md,*.txt',
+      'package.json',
+      '.github/workflows/*.yml',
+    ];
+    for (const glob of everyday) {
+      expect(checkToolCall(repo, 'Grep', { pattern: 'url', glob }), glob).toEqual({
+        allowed: true,
+      });
+    }
+  });
+
+  it('says why a glob it cannot read is refused', () => {
+    const decision = checkToolCall(repo, 'Grep', { pattern: 'url', glob: '{a,{b,c}}' });
+    expect(decision.allowed ? '' : decision.reason).toMatch(/Nested/);
   });
 
   it('refuses a network path without touching the network', () => {
