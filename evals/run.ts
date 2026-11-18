@@ -17,6 +17,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { loadConfig } from '../src/config.js';
+import { checkCitations } from '../src/curator/citations.js';
 import { curatePortfolio, curateRepo } from '../src/curator/curator.js';
 import { CuratorError } from '../src/curator/errors.js';
 import { getRepoStatus, type CitationReport } from '../src/registry.js';
@@ -116,11 +117,17 @@ async function runTrial(n: number): Promise<Trial> {
   const repoDocs = (name: string) =>
     Object.fromEntries(DOCS.map((d) => [d, read(path.join(cfg.knowledgeDir, 'repos', name, d))]));
   const ordersApi = repoDocs('orders-api');
+  const portfolio = read(path.join(cfg.knowledgeDir, 'portfolio.md'));
   const crossRepoMap = read(path.join(cfg.knowledgeDir, 'cross-repo-map.md'));
+  // The portfolio documents cite across the collection ("orders-api/src/server.js:9"), so
+  // they are checked against the repos folder rather than one repository.
+  citations.push(
+    checkCitations(cfg.reposDir, { 'portfolio.md': portfolio, 'cross-repo-map.md': crossRepoMap }),
+  );
   const everything = [
     ...Object.values(ordersApi),
     ...Object.values(repoDocs('order-worker')),
-    read(path.join(cfg.knowledgeDir, 'portfolio.md')),
+    portfolio,
     crossRepoMap,
   ].join('\n');
 
