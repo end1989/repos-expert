@@ -166,4 +166,17 @@ describe('buildPortfolioPrompt', () => {
     expect(p).toContain('Verify before asserting');
     expect(p).toContain('No evidence of a connection');
   });
+
+  it('grades a link by what ties the repos together, not by whether the integration works', () => {
+    const p = buildPortfolioPrompt({ cards: { alpha: 'a' }, manifests: {} });
+    expect(p).toContain('A grade describes the link, not whether it works');
+    expect(p).toContain('wired but broken is still **Connected**');
+  });
+
+  it('follows each HTTP call to the handler that would actually serve it, and what comes back', () => {
+    const p = buildPortfolioPrompt({ cards: { alpha: 'a' }, manifests: {} });
+    expect(p).toContain('follow the call to the handler that would actually serve it');
+    expect(p).toMatch(/route with a parameter or a wildcard[^.]*also matches/);
+    expect(p).toContain('what the caller would get back');
+  });
 });

@@ -108,7 +108,11 @@ Distinguish three things explicitly, and never blur them:
 - **Merely similar** — same framework or conventions, no data or code flowing between them. Say so; convergent tooling is not a relationship.
 - **Claimed but unconfirmed** — a card or README implies a link you could not find in the code. Say that you looked and what you found instead.
 
-"No evidence of a connection" is a useful, honest finding. An inferred link stated as fact is not.`,
+"No evidence of a connection" is a useful, honest finding. An inferred link stated as fact is not.
+
+A grade describes the link, not whether it works. Two repos are Connected when code ties them — one calls a URL or port the other serves — even if the call is broken: a link that is wired but broken is still **Connected**, and how it breaks is the finding.
+
+When one repo calls another over HTTP, follow the call to the handler that would actually serve it. Read the server's routes and match the exact request against them the way its framework does: a route with a parameter or a wildcard (\`/items/:id\`, \`/files/*\`) also matches paths that were never registered by name, so "no route has that name" does not mean the request fails. Say what the caller would get back — the status and the body — and what it does with that: checks the status, uses the body, or ignores both. A call that succeeds, returns nothing useful and is never checked is exactly what this document is for. Where you reason about how a framework behaves rather than read it, say so.`,
     PRIVACY_RULE,
     `Repo cards:\n\n${cards}`,
     `Manifests:\n\n${manifests}`,
