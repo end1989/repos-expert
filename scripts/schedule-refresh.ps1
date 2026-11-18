@@ -4,7 +4,7 @@
 
 .DESCRIPTION
   Runs `expert refresh`, which pulls repo updates and re-studies only what changed.
-  Safe to re-run — it replaces its own task rather than stacking duplicates.
+  Safe to re-run - it replaces its own task rather than stacking duplicates.
 
   The task is deliberately conservative: it only runs when the machine is on AC power
   and idle-friendly, it wakes nothing, and a missed run (laptop asleep) is retried when
@@ -50,7 +50,7 @@ $logDir = Join-Path $env:LOCALAPPDATA 'repos-expert'
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 $log = Join-Path $logDir 'weekly-refresh.log'
 
-# cmd wrapper purely to redirect stdout/stderr — schtasks has no log option.
+# cmd wrapper purely to redirect stdout/stderr - schtasks has no log option.
 $action = New-ScheduledTaskAction -Execute 'cmd.exe' `
   -Argument "/c `"`"$node`" `"$entry`" refresh > `"$log`" 2>&1`"" `
   -WorkingDirectory $root
