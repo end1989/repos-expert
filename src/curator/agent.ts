@@ -24,6 +24,10 @@ import { CuratorError } from './errors.js';
  *   studied can configure the agent that is reading it.
  * - `strictMcpConfig` with no servers means no MCP tool is reachable, whatever the
  *   machine has connected.
+ * - `verbatimPrompts` delivers the prompt as written. The prompt carries text from the
+ *   repository — commit subjects, branch names, earlier documents, manifests — and the
+ *   runtime would otherwise read an `@path` in it as a file to attach before the first
+ *   turn, a read no hook sees.
  * - A PreToolUse hook confines the three read tools to the repository (see confine.ts).
  */
 
@@ -68,6 +72,7 @@ export function buildAgentOptions(
     settingSources: [],
     mcpServers: {},
     strictMcpConfig: true,
+    verbatimPrompts: true,
     hooks: {
       PreToolUse: [{ hooks: [confineToRepo(opts.cwd, onDenied, opts.excludeRepos ?? [])] }],
     },

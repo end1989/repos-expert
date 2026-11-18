@@ -124,6 +124,13 @@ describe('buildAgentOptions — the privileges a curator session starts with', (
     expect(options.strictMcpConfig).toBe(true);
   });
 
+  it('delivers the prompt as written, so an @path in a commit message attaches nothing', () => {
+    // The runtime reads "@path" in a prompt as a file to attach before the first turn, and
+    // no PreToolUse hook sees that read. The prompt carries commit subjects, branch names and
+    // documents from the repository being studied.
+    expect(options.verbatimPrompts).toBe(true);
+  });
+
   it('installs a hook that refuses a read outside the repository', async () => {
     const hook = options.hooks?.PreToolUse?.[0]?.hooks[0];
     expect(hook).toBeTypeOf('function');
@@ -166,6 +173,7 @@ describe('createAgentRunner', () => {
     expect(query.seen[0]!.options.tools).toEqual(['Read', 'Glob', 'Grep']);
     expect(query.seen[0]!.options.permissionMode).toBe('dontAsk');
     expect(query.seen[0]!.options.settingSources).toEqual([]);
+    expect(query.seen[0]!.options.verbatimPrompts).toBe(true);
   });
 
   it('returns the agent text together with what the run cost', async () => {
