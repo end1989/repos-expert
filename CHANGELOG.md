@@ -44,6 +44,11 @@ patch bumps are fixes and additive changes). Dates are npm publish dates (UTC).
   refused). The curator's hook refuses `.git` the same way, and refuses Windows
   drive-relative paths (`C:secret`), which resolve against a folder nobody chose.
   `read_repo_file` refuses a path over 4,096 characters before resolving it.
+- **The portfolio pass no longer follows a link out of a repository.** It reads each
+  studied repo's manifests itself, outside the curator's confinement, and quoted the first
+  4,000 characters into the portfolio prompt — so a `package.json` committed as a link to
+  any file on the machine put that file in front of the model. A manifest is now judged by
+  where it leads, and one that leads out of its repository is left unread.
 - **A file cannot change between being checked and being used.** `read_repo_file` checks a
   file and reads it through one open handle, so the file that passed the checks is the one
   returned. `expert init` creates its files, and its Claude Desktop backup, in one
@@ -89,7 +94,10 @@ patch bumps are fixes and additive changes). Dates are npm publish dates (UTC).
 - A repo whose recorded commit is no longer in the clone (history rewritten, or the repo
   cloned afresh) could never be studied again.
 - A clone that failed partway left a folder the next sync reported as synced; it is
-  removed. A failing `gh` no longer stops the repos in `repos.txt` from being cloned.
+  removed — only by the sync that created the folder, so a sync running at the same time
+  never deletes another's clone. A removal that fails (a file still held open on Windows)
+  is reported with that repo, and the batch carries on. A failing `gh` no longer stops the
+  repos in `repos.txt` from being cloned.
 - The curator prompt said "exactly the four documents" in one place while the parser
   requires five, so a model that obeyed it failed the parse and was paid to run again.
 - Only a failure that another attempt could fix is retried. Every failure used to be tried
@@ -170,15 +178,19 @@ patch bumps are fixes and additive changes). Dates are npm publish dates (UTC).
 
 - **Run accounting.** Every repo curation records its cost, tokens, turns, duration and
   session id in that repo's `meta.json` (the portfolio pass in `portfolio-meta.json`);
-  batches print each repo's cost, time and turns, and the total cost.
+  batches print each repo's cost, time and turns, and the total cost. The cost covers every
+  attempt — a retry pays twice — and a repo that failed still counts: its spend is printed
+  beside the failure and included in the total (a run stopped by a timeout reports none).
   `curateMaxBudgetUsd` stops a run once its estimated cost passes that many dollars.
 - **Citation check.** After each repository is studied, the `path/file.ext:line` citations
   in its docs are checked against it; the number checked and up to 20 that do not resolve
-  go into `meta.json`, and the batch output says how many do not resolve.
+  go into `meta.json`, and the batch output says how many do not resolve. A citation is
+  judged by where it leads: one that runs through a link out of the repository is reported
+  as outside it, and the file it points at is never read.
 - **Curator eval** (`npm run eval`): studies the agent-kit fixture with the real curator and
   grades the documents in code against `agent-kit/test-fixture/EXPECTED.md` — implemented
   versus README-only routes, unused security packages, stub handlers, the cross-repo link,
-  citations, privacy — reporting pass^k over `--trials`.
+  citations (the portfolio documents' too), privacy — reporting pass^k over `--trials`.
 - `list_repos` declares an output schema and returns structured content: each repo's state,
   current commit and docs commit as data, alongside the text.
 - `expert refresh --dry-run`, and a confirmation before a long refresh (`--yes` skips it).

@@ -59,7 +59,10 @@ Breaking any of these is a vulnerability we want to hear about.
    Grep with no path relies on the runtime passing ripgrep `--glob !.git`; a Grep glob that
    would bring `.git` back (`*`, `**/*` — in ripgrep the later glob wins) is refused. In the
    portfolio pass, which reads the whole repos folder, excluded repos are refused too, and a
-   search must name one repo. Refused calls are counted in `meta.json`.
+   search must name one repo. Refused calls are counted in `meta.json`. What the tool itself
+   reads from a studied repository, outside the agent — the manifests the portfolio pass
+   quotes, the files the citation check counts lines in — is judged the same way: a link
+   out of the repository is left unread.
 2. **The curator's output is parsed against a fixed filename allowlist**, so a repository
    containing `===FILE: ../evil.md===` cannot make the tool write outside the knowledge
    folder (`src/curator/prompts.ts`). The agent returns text; the CLI writes the files.
