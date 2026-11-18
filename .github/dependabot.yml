@@ -7,11 +7,21 @@ updates:
     schedule:
       interval: weekly
       day: monday
+    # A new release waits a week before it is proposed: most compromised packages are
+    # caught and pulled within days.
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 5
-    # vitest 5 needs Node ^22.12 and drops Node 20, which this package still supports and
-    # CI still tests; its major bumps wait until the engines floor moves.
+    # Vitest 5 changes the test runner's config and reporters; moving to it is its own
+    # change, made deliberately rather than as a Monday bump.
     ignore:
       - dependency-name: vitest
+        update-types: ['version-update:semver-major']
+      - dependency-name: '@vitest/coverage-v8'
+        update-types: ['version-update:semver-major']
+      # The Node types follow the oldest Node this package supports (engines), so code
+      # cannot type-check against an API that version lacks. They move with the floor.
+      - dependency-name: '@types/node'
         update-types: ['version-update:semver-major']
     groups:
       minor-and-patch:
@@ -20,12 +30,18 @@ updates:
     commit-message:
       prefix: 'chore(deps)'
 
-  # The workflows themselves (actions/checkout, actions/setup-node).
+  # The workflows themselves. Actions are pinned to commit SHAs; Dependabot updates the
+  # SHA and its version comment together.
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
       day: monday
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns: ['*']
     labels: [dependencies, ci]
     commit-message:
       prefix: 'ci'

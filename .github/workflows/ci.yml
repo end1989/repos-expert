@@ -9,28 +9,78 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Actions are pinned to commit SHAs (Dependabot keeps them current); the comment is the tag.
 jobs:
+  check:
+    name: typecheck, lint, format, audit, coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run format:check
+      # What ships, only: the dev tree carries a picomatch advisory with no fixed release
+      # yet, reachable from the test runner and nothing that is published.
+      - run: npm audit --omit=dev --audit-level=high
+      - run: npm run test:coverage
+
   test:
-    name: build & test (${{ matrix.os }}, node ${{ matrix.node }})
+    name: test (${{ matrix.os }}, node ${{ matrix.node }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     strategy:
-      # One red cell should not hide the others — a Node-24-only or macOS-only
-      # failure is exactly the signal a matrix exists to give.
+      # One red cell should not hide the others — a Windows-only or Node-26-only failure
+      # is exactly the signal a matrix exists to give.
       fail-fast: false
       matrix:
         os: [windows-latest, ubuntu-latest, macos-latest]
-        # 20 is the floor in package.json engines and is past end-of-life (2026-04-30);
-        # it stays here for as long as we claim to support it. 22 and 24 are the LTS
-        # lines people actually run.
-        node: [20, 22, 24]
+        # 22.12 is the floor (package.json engines; commander 15 needs it). 24 and 26 are
+        # the LTS lines people run.
+        node: [22, 24, 26]
+        # "22" resolves to the newest 22.x, which would hide a dependency that quietly
+        # needs more than the floor; one cell runs the floor itself.
+        include:
+          - os: ubuntu-latest
+            node: '22.12.0'
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ matrix.node }}
           cache: npm
       - run: npm ci
-      - run: npm run build
-      # `npm test` rather than `npx vitest run`: the tarball guard in tests/ packs the
-      # package for real and needs npm's execpath in the environment.
+      # `npm test` builds first: several suites run the built CLI, and the tarball guard
+      # packs the package for real (it needs npm's execpath in the environment).
       - run: npm test
+
+  # The one check to require in branch protection: green only when everything above is.
+  ci-ok:
+    name: ci-ok
+    if: always()
+    needs: [check, test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: every job passed
+        env:
+          CHECK: ${{ needs.check.result }}
+          TEST: ${{ needs.test.result }}
+        run: |
+          if [ "$CHECK" != "success" ] || [ "$TEST" != "success" ]; then
+            echo "::error::check=$CHECK test=$TEST"
+            exit 1
+          fi
