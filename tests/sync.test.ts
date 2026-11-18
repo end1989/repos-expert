@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { ExpertConfig } from '../src/config.js';
@@ -60,6 +60,75 @@ describe('syncRepos when things go wrong', () => {
     );
     expect(res.failed.map((f) => f.name)).toEqual(['broken']);
     expect(fs.existsSync(dest)).toBe(false);
+  });
+
+  it('never removes a clone that another sync made while this one was failing', async () => {
+    // Two syncs both find the repo missing. One clone wins; the other fails because the
+    // folder is there now. The run that failed did not make that folder and must not delete it.
+    const cfg = { ...makeCfg(makeTempDir('expert-sync-')), githubUser: null };
+    writeList(cfg, 'https://github.com/acme/shared.git');
+    const dest = path.join(cfg.reposDir, 'shared');
+    let bothLooked!: () => void;
+    const looked = new Promise<void>((resolve) => (bothLooked = resolve));
+    let winnerDone!: () => void;
+    const won = new Promise<void>((resolve) => (winnerDone = resolve));
+    const winner = syncRepos(
+      cfg,
+      noDeps({
+        clone: async (_url, to) => {
+          await looked;
+          fs.mkdirSync(path.join(to, '.git'), { recursive: true });
+          fs.writeFileSync(path.join(to, 'README.md'), 'cloned by the winner');
+          winnerDone();
+        },
+      }),
+    );
+    const loser = syncRepos(
+      cfg,
+      noDeps({
+        clone: async (_url, to) => {
+          await won;
+          throw new Error(`fatal: destination path '${to}' already exists`);
+        },
+      }),
+    );
+    bothLooked();
+    const [first, second] = await Promise.all([winner, loser]);
+    expect(first.synced).toEqual(['shared']);
+    expect(second.failed.map((f) => f.name)).toEqual(['shared']);
+    expect(fs.readFileSync(path.join(dest, 'README.md'), 'utf8')).toBe('cloned by the winner');
+  });
+
+  it('reports a partial clone it could not remove, and carries on with the next repo', async () => {
+    const cfg = { ...makeCfg(makeTempDir('expert-sync-')), githubUser: null };
+    writeList(
+      cfg,
+      ['https://github.com/acme/stuck.git', 'https://github.com/acme/fine.git'].join('\n'),
+    );
+    // A file another program still holds open can stop the removal on Windows.
+    const rm = vi.spyOn(fs, 'rmSync').mockImplementationOnce(() => {
+      throw Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' });
+    });
+    try {
+      const res = await syncRepos(
+        cfg,
+        noDeps({
+          clone: async (url, to) => {
+            fs.mkdirSync(path.join(to, '.git'), { recursive: true });
+            if (url.includes('stuck')) throw new Error('fatal: early EOF');
+          },
+        }),
+      );
+      expect(res.synced).toEqual(['fine']);
+      expect(res.failed).toEqual([
+        {
+          name: 'stuck',
+          error: expect.stringMatching(/early EOF[\s\S]*could not be removed[\s\S]*EBUSY/),
+        },
+      ]);
+    } finally {
+      rm.mockRestore();
+    }
   });
 
   it('never removes a folder that was already there when the update failed', async () => {

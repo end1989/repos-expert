@@ -8,6 +8,7 @@ import {
   type RemoteRepo,
 } from '../git.js';
 import { readReposList } from '../repos-list.js';
+import { errorCode } from '../paths.js';
 import { isExcluded, type ExpertConfig } from '../config.js';
 
 export interface SyncDeps {
@@ -122,20 +123,56 @@ export async function syncRepos(
     }
     const dest = path.join(cfg.reposDir, target.name);
     const isClone = !fs.existsSync(path.join(dest, '.git'));
-    const existedBefore = fs.existsSync(dest);
+    // Whether this run made the folder. Only that run may remove it: a sync running at the
+    // same time can also find the repo missing, and its failed clone must not delete ours.
+    let created = false;
     try {
-      if (isClone) await deps.clone(target.url, dest);
-      else await target.refresh(dest);
+      if (isClone) {
+        created = createFolder(dest);
+        await deps.clone(target.url, dest);
+      } else {
+        await target.refresh(dest);
+      }
       result.synced.push(target.name);
     } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
       // A clone that died partway leaves a .git with no usable checkout, which the next
       // run would take for a repo and "update". Remove what this run created, never more.
-      if (isClone && !existedBefore) fs.rmSync(dest, { recursive: true, force: true });
+      const leftover = created ? removePartialClone(dest) : null;
       result.failed.push({
         name: target.name,
-        error: err instanceof Error ? err.message : String(err),
+        error: leftover === null ? error : `${error}. ${leftover}`,
       });
     }
   }
   return result;
+}
+
+/**
+ * Creates `dir` unless something is already there; true only when this call made it.
+ * Creating is the check: two runs that both find the folder missing cannot both create it.
+ * git clones into an empty folder as readily as into a new one.
+ */
+function createFolder(dir: string): boolean {
+  try {
+    fs.mkdirSync(dir);
+    return true;
+  } catch (err) {
+    if (errorCode(err) === 'EEXIST') return false;
+    throw err;
+  }
+}
+
+/**
+ * Removes a clone that failed partway. On Windows a file another program still holds can
+ * stop that; then the repo's failure says what to delete by hand, and the batch goes on.
+ */
+function removePartialClone(dir: string): string | null {
+  try {
+    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 3 });
+    return null;
+  } catch (err) {
+    const why = err instanceof Error ? err.message : String(err);
+    return `The partial clone at ${dir} could not be removed (${why}): delete it before the next sync`;
+  }
 }

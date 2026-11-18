@@ -38,6 +38,14 @@ describe('git sync operations, for real', () => {
     expect(fs.readFileSync(path.join(dest, 'README.md'), 'utf8')).toBe('v1\n');
   });
 
+  it('clones into the empty folder sync creates first to claim the name', async () => {
+    const { url } = origin();
+    const dest = cloneInto();
+    fs.mkdirSync(dest);
+    await cloneRepo(url, dest);
+    expect(fs.readFileSync(path.join(dest, 'README.md'), 'utf8')).toBe('v1\n');
+  });
+
   it('refuses a URL that starts with a dash before git ever sees it', async () => {
     const dest = cloneInto();
     await expect(cloneRepo('--upload-pack=touch pwned', dest)).rejects.toThrow(
