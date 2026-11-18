@@ -180,8 +180,9 @@ the curator's own runner and prompt builder, against a fake Messages API on 127.
 fake model asks for reads outside the repository and into `.git`, the prompt carries
 `@path` mentions, and the studied repository carries its own `CLAUDE.md`, hooks and MCP
 server. The test fails if anything planted outside the allowed area reaches a request, or
-if any of the repository's configuration is loaded. A control session with the
-protections switched off shows each attack is live, and a corpus of Grep globs is judged
+if any of the repository's configuration is loaded. A control session, with the hook
+removed and the other protections switched off, shows every attack succeeds and every
+planted configuration that this runtime can load is loaded; a corpus of Grep globs is judged
 by the ripgrep inside the runtime. It spends no tokens; CI runs it on Linux, macOS and
 Windows.
 

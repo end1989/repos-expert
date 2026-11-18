@@ -48,11 +48,12 @@ patch bumps are fixes and additive changes). Dates are npm publish dates (UTC).
   for the folder, even with no settings loaded, as instructions that override its
   defaults; the session now turns it off (`autoMemoryEnabled: false`). It no longer passes
   on `RIPGREP_CONFIG_PATH`, whose `--follow` made Glob list files behind a link out of the
-  repository when the runtime used the system ripgrep. A control session with those
-  protections switched off
-  shows each planted attack is live. CI runs it on Linux, macOS and Windows. The Agent SDK
-  is pinned to an exact version, and Dependabot proposes each new one on its own, so that
-  test meets every runtime before it ships.
+  repository when the runtime used the system ripgrep. A control session, with the hook
+  removed and those protections switched off, shows the attacks are live: every refused
+  call succeeds, the mentioned files are attached, the repository's hooks and MCP server
+  run, and its `CLAUDE.md` and the operator's auto-memory are loaded. CI runs it on Linux,
+  macOS and Windows. The Agent SDK is pinned to an exact version, and Dependabot proposes
+  each new one on its own, so that test meets every runtime before it ships.
 - **`expert mcp --http`: a malformed request no longer crashes the server.** A request for
   `//` raised an unhandled rejection before the token check — an unauthenticated crash
   under Node's defaults. It is now a 400. Binding to `--host ::1` crashed on every request;
