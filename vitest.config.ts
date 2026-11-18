@@ -1,4 +1,4 @@
-import { defineConfig } from 'vitest/config';
+import { configDefaults, defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
@@ -7,6 +7,8 @@ export default defineConfig({
     // Only this project's tests — a repos/ folder beside a clone can hold many other
     // repositories whose own test suites must never be swept into our runs.
     include: ['tests/**/*.test.ts'],
+    // The tests that start the real runtime have their own config: `npm run test:runtime`.
+    exclude: [...configDefaults.exclude, 'tests/runtime/**'],
     setupFiles: ['tests/setup.ts'],
     coverage: {
       provider: 'v8',
