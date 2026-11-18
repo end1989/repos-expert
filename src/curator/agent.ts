@@ -100,10 +100,13 @@ function statsFrom(result: SDKResultMessage, deniedToolCalls: number): RunStats 
 }
 
 function outcomeOf(result: SDKResultMessage, deniedToolCalls: number): AgentRun {
+  // A run that failed was still paid for: every failure carries what it spent.
+  const stats = statsFrom(result, deniedToolCalls);
   if (result.subtype === 'error_max_budget_usd') {
     throw new CuratorError(
       'budget',
       'Stopped at the spending cap for one repository. Raise "curateMaxBudgetUsd" in the config, or leave the repo out with "excludeRepos".',
+      { stats },
     );
   }
   if (result.subtype !== 'success') {
@@ -111,17 +114,19 @@ function outcomeOf(result: SDKResultMessage, deniedToolCalls: number): AgentRun 
     throw new CuratorError(
       'agent',
       `Curator agent failed (${result.subtype})${detail.length > 0 ? `: ${detail}` : ''}`,
+      { stats },
     );
   }
   if (result.is_error) {
     const diagnosis = diagnoseAgentOutput(result.result);
-    if (diagnosis !== null) throw new CuratorError(diagnosis.kind, diagnosis.message);
+    if (diagnosis !== null) throw new CuratorError(diagnosis.kind, diagnosis.message, { stats });
     throw new CuratorError(
       'agent',
       `Curator agent reported an error: ${result.result.trim().slice(0, 400)}`,
+      { stats },
     );
   }
-  return { output: result.result, stats: statsFrom(result, deniedToolCalls) };
+  return { output: result.result, stats };
 }
 
 export function createAgentRunner(queryFn: QueryFn = query): AgentRunner {

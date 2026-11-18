@@ -1,4 +1,5 @@
 import type { ExpertConfig } from '../config.js';
+import { CuratorError } from '../curator/errors.js';
 import type { CitationReport, RepoStatus, RunStats } from '../registry.js';
 import { describeCitations, describeRun } from './messages.js';
 
@@ -43,7 +44,7 @@ export async function curateMany(
   let next = 0;
   let finished = 0;
   let spentUsd = 0;
-  let measuredRuns = 0;
+  let measuredRepos = 0;
 
   async function worker(): Promise<void> {
     for (let i = next++; i < total; i = next++) {
@@ -54,7 +55,7 @@ export async function curateMany(
         const stats = result?.stats;
         if (stats !== undefined) {
           spentUsd += stats.costUsd;
-          measuredRuns += 1;
+          measuredRepos += 1;
         }
         const notes = [
           stats !== undefined ? describeRun(stats) : '',
@@ -67,16 +68,24 @@ export async function curateMany(
         const error = err instanceof Error ? err.message : String(err);
         failures[i] = { name: status.name, error };
         finished += 1;
-        console.error(`FAILED ${status.name}: ${error} (${finished}/${total})`);
+        // A failed repo was still paid for: its spend counts, and is shown beside it.
+        const stats = err instanceof CuratorError ? err.stats : undefined;
+        if (stats !== undefined) {
+          spentUsd += stats.costUsd;
+          measuredRepos += 1;
+        }
+        console.error(
+          `FAILED ${status.name}: ${error} (${finished}/${total})${stats !== undefined ? ` — ${describeRun(stats)}` : ''}`,
+        );
       }
     }
   }
 
   const workers = Math.min(Math.max(1, concurrency), total);
   await Promise.all(Array.from({ length: workers }, () => worker()));
-  if (measuredRuns > 0) {
+  if (measuredRepos > 0) {
     console.log(
-      `Spent about $${spentUsd.toFixed(2)} on ${measuredRuns} ${measuredRuns === 1 ? 'run' : 'runs'} (the agent runtime’s estimate, not a bill).`,
+      `Spent about $${spentUsd.toFixed(2)} across ${measuredRepos} ${measuredRepos === 1 ? 'repo' : 'repos'} (the agent runtime’s estimate, not a bill).`,
     );
   }
   return failures.filter((f): f is CurateFailure => f !== undefined);

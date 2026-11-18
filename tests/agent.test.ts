@@ -220,6 +220,22 @@ describe('createAgentRunner', () => {
     await expect(run).rejects.toThrow(/curateMaxBudgetUsd/);
   });
 
+  it.each([
+    ['a spent budget', failure('error_max_budget_usd', []), 0.05],
+    ['an execution error', failure('error_during_execution', ['tool crashed']), 0.05],
+    [
+      'a result flagged as an error',
+      success({ is_error: true, result: 'Invalid API key · Fix external API key' }),
+      0.42,
+    ],
+  ] as const)('still reports what the run spent when it ends in %s', async (_, result, costUsd) => {
+    const run = createAgentRunner(replay([result]))('p', runOpts());
+    await expect(run).rejects.toMatchObject({
+      name: 'CuratorError',
+      stats: { costUsd, sessionId: 'session-abc' },
+    });
+  });
+
   it('reads a "successful" result that is flagged as an error as the failure it is', async () => {
     // The runtime reports an unusable credential as a success whose text is the complaint.
     const complaint = success({ is_error: true, result: 'Invalid API key · Fix external API key' });

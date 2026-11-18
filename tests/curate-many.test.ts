@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import type { ExpertConfig } from '../src/config.js';
 import type { RepoStatus, RunStats } from '../src/registry.js';
 import { curateMany, describeRun, parseConcurrency } from '../src/cli/curate-many.js';
+import { CuratorError } from '../src/curator/errors.js';
 import { makeTempDir, testConfig } from './helpers.js';
 
 function makeCfg(root: string, curateConcurrency = 4): ExpertConfig {
@@ -147,7 +148,43 @@ describe('curateMany', () => {
     expect(lines).toContain('curated a (1/2) — $0.50, 2.9 min, 41 turns');
     expect(lines).toContain('curated b (2/2) — $0.25, 2.9 min, 41 turns');
     expect(lines.at(-1)).toBe(
-      'Spent about $0.75 on 2 runs (the agent runtime’s estimate, not a bill).',
+      'Spent about $0.75 across 2 repos (the agent runtime’s estimate, not a bill).',
+    );
+  });
+
+  it('counts what a failed repo spent, and says so beside the failure', async () => {
+    const cfg = makeCfg(makeTempDir('expert-cm-'));
+    const lines: string[] = [];
+    const errors: string[] = [];
+    const log = vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+      lines.push(args.join(' '));
+    });
+    const err = vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+      errors.push(args.join(' '));
+    });
+    try {
+      await curateMany(
+        cfg,
+        [status('a'), status('b')],
+        async (_cfg, s) => {
+          if (s.name === 'b') {
+            throw new CuratorError('budget', 'Stopped at the spending cap for one repository.', {
+              stats: { ...STATS, costUsd: 0.25 },
+            });
+          }
+          return { stats: { ...STATS, costUsd: 0.5 }, citations: { checked: 4, broken: [] } };
+        },
+        1,
+      );
+    } finally {
+      log.mockRestore();
+      err.mockRestore();
+    }
+    expect(errors).toEqual([
+      'FAILED b: Stopped at the spending cap for one repository. (2/2) — $0.25, 2.9 min, 41 turns',
+    ]);
+    expect(lines.at(-1)).toBe(
+      'Spent about $0.75 across 2 repos (the agent runtime’s estimate, not a bill).',
     );
   });
 

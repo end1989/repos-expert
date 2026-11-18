@@ -1,3 +1,5 @@
+import type { RunStats } from '../registry.js';
+
 /**
  * Why a curation attempt failed, named by what should happen next rather than by where
  * the failure surfaced.
@@ -36,11 +38,21 @@ const FINAL: ReadonlySet<CuratorFailureKind> = new Set<CuratorFailureKind>([
 
 export class CuratorError extends Error {
   readonly kind: CuratorFailureKind;
+  /**
+   * What the attempts that ended in this failure consumed, when the runtime reported it.
+   * A failed run is still a paid run: one stopped at the spending cap cost about the cap.
+   */
+  stats: RunStats | undefined;
 
-  constructor(kind: CuratorFailureKind, message: string, options?: ErrorOptions) {
+  constructor(
+    kind: CuratorFailureKind,
+    message: string,
+    options?: ErrorOptions & { stats?: RunStats },
+  ) {
     super(message, options);
     this.name = 'CuratorError';
     this.kind = kind;
+    this.stats = options?.stats;
   }
 
   /** Whether running the same thing again could plausibly end differently. */

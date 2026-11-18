@@ -18,6 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { loadConfig } from '../src/config.js';
 import { curatePortfolio, curateRepo } from '../src/curator/curator.js';
+import { CuratorError } from '../src/curator/errors.js';
 import { getRepoStatus, type CitationReport } from '../src/registry.js';
 import {
   gradeCitations,
@@ -102,6 +103,8 @@ async function runTrial(n: number): Promise<Trial> {
     }
     costUsd += (await curatePortfolio(cfg))?.costUsd ?? 0;
   } catch (err) {
+    // A pass that failed was still paid for.
+    if (err instanceof CuratorError) costUsd += err.stats?.costUsd ?? 0;
     return {
       grades: [],
       costUsd,

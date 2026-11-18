@@ -11,9 +11,9 @@ import {
   type RepoStatus,
   type RunStats,
 } from '../registry.js';
-import { runClaudeAgent, type AgentRunner, type RunOpts } from './agent.js';
+import { runClaudeAgent, type AgentRun, type AgentRunner, type RunOpts } from './agent.js';
 import { checkCitations } from './citations.js';
-import { isWorthRetrying } from './errors.js';
+import { CuratorError, isWorthRetrying } from './errors.js';
 import {
   DOC_FILES,
   PORTFOLIO_FILES,
@@ -40,7 +40,8 @@ function runOptsFor(cfg: ExpertConfig, cwd: string): RunOpts {
 /**
  * Runs the agent and parses its answer, with one more attempt when the failure might not
  * repeat. Every attempt is a full, paid model run, so a failure that is known to be final
- * — a timeout, a spent budget, a rejected credential — is reported, not retried.
+ * — a timeout, a spent budget, a rejected credential — is reported, not retried. What
+ * every attempt consumed is counted, whether the run ends in documents or in a failure.
  */
 async function runAndParse(
   runner: AgentRunner,
@@ -48,16 +49,54 @@ async function runAndParse(
   opts: RunOpts,
   expected: readonly string[],
 ): Promise<{ docs: Record<string, string>; stats: RunStats | undefined }> {
-  const attempt = async () => {
-    const run = await runner(prompt, opts);
-    return { docs: parseCuratedDocs(run.output, expected), stats: run.stats };
+  let spent: RunStats | undefined;
+  const attempt = async (): Promise<Record<string, string>> => {
+    let run: AgentRun;
+    try {
+      run = await runner(prompt, opts);
+    } catch (err) {
+      spent = addStats(spent, err instanceof CuratorError ? err.stats : undefined);
+      throw err;
+    }
+    spent = addStats(spent, run.stats);
+    return parseCuratedDocs(run.output, expected);
   };
   try {
-    return await attempt();
+    let docs: Record<string, string>;
+    try {
+      docs = await attempt();
+    } catch (err) {
+      if (!isWorthRetrying(err)) throw err;
+      docs = await attempt();
+    }
+    return { docs, stats: spent };
   } catch (err) {
-    if (!isWorthRetrying(err)) throw err;
-    return await attempt();
+    // The failure carries what its attempts spent, so a batch total can include it.
+    if (spent === undefined) throw err;
+    if (err instanceof CuratorError) {
+      err.stats = spent;
+      throw err;
+    }
+    throw new CuratorError('agent', err instanceof Error ? err.message : String(err), {
+      cause: err,
+      stats: spent,
+    });
   }
+}
+
+/** Two runs' consumption as one. The session it names is the later run's. */
+function addStats(a: RunStats | undefined, b: RunStats | undefined): RunStats | undefined {
+  if (a === undefined) return b;
+  if (b === undefined) return a;
+  return {
+    costUsd: a.costUsd + b.costUsd,
+    turns: a.turns + b.turns,
+    durationMs: a.durationMs + b.durationMs,
+    inputTokens: a.inputTokens + b.inputTokens,
+    outputTokens: a.outputTokens + b.outputTokens,
+    sessionId: b.sessionId,
+    deniedToolCalls: a.deniedToolCalls + b.deniedToolCalls,
+  };
 }
 
 function readExistingDocs(knowledgeDir: string, name: string): Record<string, string> | undefined {

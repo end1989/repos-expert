@@ -36,6 +36,16 @@ const allDocs = [
 const done = (output: string, stats?: RunStats): AgentRun =>
   stats === undefined ? { output } : { output, stats };
 
+const RUN: RunStats = {
+  costUsd: 0.84,
+  turns: 41,
+  durationMs: 174_000,
+  inputTokens: 512_000,
+  outputTokens: 9_800,
+  sessionId: 'session-xyz',
+  deniedToolCalls: 0,
+};
+
 /** A link to a file needs a privilege on Windows that a link to a folder (junction) does not. */
 const fileLinksWork = ((): boolean => {
   const dir = makeTempDir('expert-cur-link-');
@@ -215,6 +225,48 @@ describe('curateRepo', () => {
     );
     expect(returned.stats).toEqual(stats);
     expect(readMeta(cfg.knowledgeDir, 'alpha')?.run).toEqual(stats);
+  });
+
+  it.each([
+    [
+      'answered with something other than the documents',
+      () => done('I ran out of room.', { ...RUN, costUsd: 0.5, turns: 30, sessionId: 'first' }),
+    ],
+    [
+      'failed after spending',
+      () => {
+        throw new CuratorError('agent', 'Curator agent failed (error_during_execution)', {
+          stats: { ...RUN, costUsd: 0.5, turns: 30, sessionId: 'first' },
+        });
+      },
+    ],
+  ] as const)(
+    'counts what the first attempt cost when it %s and the retry succeeded',
+    async (_, firstAttempt) => {
+      const cfg = makeCfg(makeTempDir('expert-cur-'));
+      repoWithOneCommit(cfg);
+      let attempts = 0;
+      const returned = await curateRepo(cfg, await getRepoStatus(cfg, 'alpha'), async () => {
+        attempts += 1;
+        return attempts === 1
+          ? firstAttempt()
+          : done(allDocs, { ...RUN, costUsd: 0.25, turns: 11, sessionId: 'second' });
+      });
+      expect(returned.stats).toMatchObject({ costUsd: 0.75, turns: 41, sessionId: 'second' });
+      expect(readMeta(cfg.knowledgeDir, 'alpha')?.run).toMatchObject({ costUsd: 0.75 });
+    },
+  );
+
+  it('says what a failure cost, counting both attempts', async () => {
+    const cfg = makeCfg(makeTempDir('expert-cur-'));
+    repoWithOneCommit(cfg);
+    await expect(
+      curateRepo(cfg, await getRepoStatus(cfg, 'alpha'), async () => {
+        throw new CuratorError('agent', 'Curator agent failed (error_during_execution)', {
+          stats: { ...RUN, costUsd: 0.5 },
+        });
+      }),
+    ).rejects.toMatchObject({ kind: 'agent', stats: { costUsd: 1 } });
   });
 
   it('checks every file:line the docs cite against the repo, and records what did not resolve', async () => {
