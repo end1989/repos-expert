@@ -2,7 +2,7 @@ import type { ExpertConfig } from '../config.js';
 import type { RepoStatus } from '../registry.js';
 import { curateRepo } from '../curator/curator.js';
 
-export type CurateOne = (cfg: ExpertConfig, status: RepoStatus) => Promise<void>;
+export type CurateOne = (cfg: ExpertConfig, status: RepoStatus) => Promise<unknown>;
 
 export interface CurateFailure {
   name: string;

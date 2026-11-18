@@ -9,7 +9,9 @@ describe('explainAgentOutput', () => {
   });
 
   it('recognises not being signed in', () => {
-    expect(explainAgentOutput('Please run /login to authenticate')).toMatch(/sign(ed)? in|log ?in/i);
+    expect(explainAgentOutput('Please run /login to authenticate')).toMatch(
+      /sign(ed)? in|log ?in/i,
+    );
     expect(explainAgentOutput('Invalid bearer token')).toMatch(/sign(ed)? in|log ?in|token/i);
   });
 

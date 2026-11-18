@@ -11,7 +11,7 @@ import { partitionStale, type ReverifyDeps } from './reverify.js';
 export interface RefreshDeps {
   sync(cfg: ExpertConfig, only?: string[]): Promise<SyncResult>;
   curateOne?: CurateOne;
-  portfolio(cfg: ExpertConfig): Promise<void>;
+  portfolio(cfg: ExpertConfig): Promise<unknown>;
   listStatuses(cfg: ExpertConfig): Promise<RepoStatus[]>;
   getStatus(cfg: ExpertConfig, name: string): Promise<RepoStatus>;
   /** Injectable for tests; the real one asks git. */
