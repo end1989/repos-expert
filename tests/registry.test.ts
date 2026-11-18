@@ -5,24 +5,15 @@ import type { ExpertConfig } from '../src/config.js';
 import {
   getRepoStatus,
   listRepoStatuses,
+  scanRepos,
   readMeta,
   writeMeta,
   stalenessBanner,
 } from '../src/registry.js';
-import { makeTempDir, initGitRepo, commitFile } from './helpers.js';
+import { makeTempDir, initGitRepo, commitFile, testConfig } from './helpers.js';
 
 function makeCfg(root: string): ExpertConfig {
-  return {
-    githubUser: 'u',
-    reposDir: path.join(root, 'repos'),
-    reposListFile: path.join(root, 'repos', 'repos.txt'),
-    knowledgeDir: path.join(root, 'knowledge'),
-    model: 'claude-sonnet-5',
-    excludeRepos: [],
-    includeArchived: false,
-    curateConcurrency: 4,
-    curateTimeoutMinutes: 25,
-  };
+  return testConfig(root, { githubUser: 'u', curateConcurrency: 4 });
 }
 
 describe('listRepoStatuses with excludeRepos', () => {
@@ -117,14 +108,38 @@ describe('registry', () => {
     expect(names).toEqual(['real-repo']);
   });
 
+  it('says which folders it skipped and why, instead of letting them vanish', async () => {
+    const cfg2 = makeCfg(makeTempDir('expert-reg-scan-'));
+    initGitRepo(path.join(cfg2.reposDir, 'empty-repo'));
+    const real = path.join(cfg2.reposDir, 'real-repo');
+    initGitRepo(real);
+    commitFile(real, 'a.txt', 'a');
+    const { statuses, skipped } = await scanRepos(cfg2);
+    expect(statuses.map((s) => s.name)).toEqual(['real-repo']);
+    expect(skipped).toEqual([{ name: 'empty-repo', reason: 'no commits yet' }]);
+  });
+
+  it('does not mistake a plain folder for a repo because an enclosing folder is one', async () => {
+    const cfg2 = makeCfg(makeTempDir('expert-reg-nested-'));
+    initGitRepo(cfg2.reposDir); // the repos folder itself is under version control
+    commitFile(cfg2.reposDir, 'plain/notes.txt', 'just a folder');
+    await expect(getRepoStatus(cfg2, 'plain')).rejects.toThrow(/not a git repository/);
+  });
+
+  it('reads a meta.json of the wrong shape as "not curated" rather than letting it break a tool', () => {
+    const root = makeTempDir('expert-reg-shape-');
+    const dir = path.join(root, 'repos', 'odd');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify({ sha: 42, curatedAt: [] }));
+    expect(readMeta(root, 'odd')).toBeNull();
+  });
+
   it('builds staleness banners', async () => {
     expect(stalenessBanner(await getRepoStatus(cfg, 'fresh-repo'))).toBe('');
     expect(stalenessBanner(await getRepoStatus(cfg, 'stale-repo'))).toContain(
       'trust live search over summaries',
     );
-    expect(stalenessBanner(await getRepoStatus(cfg, 'bare-repo'))).toContain(
-      'no curated docs yet',
-    );
+    expect(stalenessBanner(await getRepoStatus(cfg, 'bare-repo'))).toContain('no curated docs yet');
   });
 });
 
@@ -136,10 +151,21 @@ describe('verifiedSha — the refresh fast path', () => {
     initGitRepo(dir);
     const first = commitFile(dir, 'src/a.ts', 'export const a = 1;\n', 'code');
     const second = commitFile(dir, 'README.md', '# r\n', 'docs only');
-    writeMeta(cfg.knowledgeDir, 'r', { sha: first, curatedAt: '2026-08-10T00:00:00Z', model: 'm', docVersion: 1 });
+    writeMeta(cfg.knowledgeDir, 'r', {
+      sha: first,
+      curatedAt: '2026-08-10T00:00:00Z',
+      model: 'm',
+      docVersion: 1,
+    });
     expect((await getRepoStatus(cfg, 'r')).state).toBe('stale');
 
-    writeMeta(cfg.knowledgeDir, 'r', { sha: first, curatedAt: '2026-08-10T00:00:00Z', model: 'm', docVersion: 1, verifiedSha: second });
+    writeMeta(cfg.knowledgeDir, 'r', {
+      sha: first,
+      curatedAt: '2026-08-10T00:00:00Z',
+      model: 'm',
+      docVersion: 1,
+      verifiedSha: second,
+    });
     const s = await getRepoStatus(cfg, 'r');
     expect(s.state).toBe('fresh');
     expect(s.curatedSha).toBe(first);
@@ -154,7 +180,13 @@ describe('verifiedSha — the refresh fast path', () => {
     initGitRepo(dir);
     const first = commitFile(dir, 'src/a.ts', 'a', 'code');
     const second = commitFile(dir, 'README.md', 'r', 'docs');
-    writeMeta(cfg.knowledgeDir, 'r', { sha: first, curatedAt: 'x', model: 'm', docVersion: 1, verifiedSha: second });
+    writeMeta(cfg.knowledgeDir, 'r', {
+      sha: first,
+      curatedAt: 'x',
+      model: 'm',
+      docVersion: 1,
+      verifiedSha: second,
+    });
     commitFile(dir, 'src/b.ts', 'b', 'more code');
     const s = await getRepoStatus(cfg, 'r');
     expect(s.state).toBe('stale');
