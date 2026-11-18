@@ -12,6 +12,10 @@ hard to evaluate — this turns "seems fine" into a pass or fail against fixed l
 
 Then `/study orders-api`, `/study order-worker`, `/map`, and grade against `EXPECTED.md`.
 
+The CLI's own curator is graded against the same fixture automatically: `npm run eval`
+(from the repository root) builds it, runs the real curator, and checks sections 1–6 in
+code — see `evals/graders.ts`.
+
 ## What the fixture contains
 
 **`orders-api`** — a README describing a service that was never built. It advertises five

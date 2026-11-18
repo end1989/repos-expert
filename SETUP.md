@@ -59,9 +59,11 @@ You do not have to use the list at all. It exists so there is one obvious place 
 "how do I tell it about my services?" — but a folder you copied projects into works
 exactly the same. To keep the list somewhere else, set `reposListFile` in your config.
 
-**Working on the tool itself?** Clone it instead and run `.\scripts\setup.ps1`, which
-installs prerequisites, builds from source, and connects the same way. The long version
-below covers that route.
+**Working on the tool itself?** Clone it instead and run `.\scripts\setup.ps1` (Windows
+PowerShell 5.1 or PowerShell 7), which installs prerequisites, builds from source, and
+runs the same `init` against the clone's own `expert.config.json` — registered in Claude
+Desktop as `repos-expert-dev`, with `--config`, so it never picks up another config. The
+long version below covers that route.
 
 ---
 
@@ -69,7 +71,7 @@ below covers that route.
 
 | Thing | Needed? | Why |
 | --- | --- | --- |
-| **Node 20 or newer** | Yes | Runs the tool. |
+| **Node 22.12 or newer** | Yes | Runs the tool. |
 | **A folder of code** | Yes | The projects to study. |
 | **Claude Desktop** | To ask questions | The chat window you type into. |
 | **Claude Code** | To write the docs | The studying step uses a model. Free with a Claude subscription. |
@@ -95,7 +97,7 @@ macOS (Homebrew) / Linux:
 
 ```sh
 brew install node git gh          # macOS
-sudo apt install nodejs git gh    # Debian/Ubuntu — check `node --version` is 20+; nodesource.com if not
+sudo apt install nodejs git gh    # Debian/Ubuntu — check `node --version` is 22.12+; nodesource.com if not
 ```
 
 Close and reopen your terminal afterwards so it picks up the new commands. Everything
@@ -120,7 +122,13 @@ npm run build
 
 ### 3. Point it at your code
 
-Open `expert.config.json` and set where your projects live:
+Create the config from the example (if you ran `.\scripts\setup.ps1`, it already wrote one):
+
+```powershell
+Copy-Item expert.config.example.json expert.config.json   # macOS/Linux: cp expert.config.example.json expert.config.json
+```
+
+Then open `expert.config.json` and set where your projects live:
 
 ```json
 {
@@ -160,7 +168,8 @@ node dist/cli/index.js refresh <one-project-name>
 
 Two to four minutes later there will be five new documents under
 `knowledge/repos/<project>/`. Open `card.md` and read it. If it describes your project
-accurately, everything works.
+accurately, everything works. The line it prints says what the run cost, and if any of the
+file:line references in the documents point at lines that don't exist, it says that too.
 
 ### 5. Study the rest
 
@@ -173,7 +182,8 @@ anytime and pick up later — finished work is saved as it goes.
 
 To study **everything** in the folder: `node dist/cli/index.js curate --stale`.
 Be aware this can take hours on a large folder, and it uses your Claude allowance the
-whole time. Naming projects is usually the better choice.
+whole time. Naming projects is usually the better choice. Add `--dry-run` to any of these
+to see what would be studied, and roughly what it would cost, without starting.
 
 ### 6. Connect it to Claude Desktop
 
@@ -253,6 +263,11 @@ authenticates itself. `expert doctor` tells you which of these is in force:
 | custom endpoint … | A local model or proxy. Nothing billed to Anthropic. |
 | AWS Bedrock / Google Vertex | Billed by that cloud. |
 
+Every run records what it actually spent (the agent runtime's estimate) in
+`knowledge/repos/<project>/meta.json`. To cap a single run, add
+`"curateMaxBudgetUsd": 2` (dollars) to your config; a run that reaches the cap stops, and
+is reported rather than retried.
+
 ### Using a local model
 
 Run something that speaks the Anthropic message format in front of your local model —
@@ -299,7 +314,9 @@ starts anyway rather than showing you a dead server.
 
 **"No projects found"** — `reposDir` is pointing at the wrong folder, or the folders in
 it aren't git repositories. The tool prints the exact path it looked in. To move it, edit
-`reposDir` in your config, or re-run `expert init --repos-dir "<path>" --force`.
+`reposDir` in your config, or re-run `expert init --repos-dir "<path>" --force` — that
+changes only the folder, keeps your other settings, and saves the old config beside it as
+`expert.config.json.backup`.
 
 **You have a folder with nothing but `CLAUDE.md` and `repos.txt` in it** — that is a
 fresh, empty setup. Either it guessed the wrong folder (fix `reposDir` as above) or no
@@ -317,7 +334,10 @@ reading code need neither.
 
 **A project times out** — it was too big to finish in the time limit. Raise
 `curateTimeoutMinutes`, or lower `curateConcurrency` to 1 so it gets more of the
-machine.
+machine. A timeout is not retried automatically, so it is never paid for twice.
+
+**`status` lists a folder as skipped** — it has a `.git` but cannot be served yet, and the
+reason is on the line: usually "no commits yet". Commit something, and it appears.
 
 **Claude Desktop doesn't show the tools** — the path in the config must be absolute,
 and Claude Desktop must be fully restarted (quit from the tray, not just closed).
