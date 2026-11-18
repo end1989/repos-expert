@@ -284,6 +284,30 @@ describe('checkToolCall — what the curator may touch', () => {
     },
   );
 
+  it.runIf(process.platform === 'win32' && linkOk)(
+    'refuses a name Windows would rewrite: one ending in a dot or a space',
+    () => {
+      // Node opens "xd." as written; ripgrep drops the trailing dot as Win32 does and
+      // searches "xd" — here a link out of the repository. Such names come from archives,
+      // not from git, which refuses to check them out.
+      fs.mkdirSync(`\\\\?\\${path.join(repo, 'xd.')}`);
+      fs.writeFileSync(`\\\\?\\${path.join(repo, 'xd.', 'decoy.txt')}`, 'decoy\n');
+      fs.symlinkSync(outside, path.join(repo, 'xd'), 'junction');
+      const r = repo.replace(/\\/g, '/');
+      const attempts: [string, Record<string, unknown>][] = [
+        ['Grep', { pattern: 'x', path: 'xd.' }],
+        ['Glob', { pattern: '*', path: 'xd.' }],
+        ['Glob', { pattern: `${r}/xd./*` }],
+        ['Read', { file_path: `${r}/xd./decoy.txt` }],
+        ['Grep', { pattern: 'x', path: 'escape.' }], // no such folder: the link itself, dotted
+        ['Grep', { pattern: 'x', path: 'src /index.ts' }],
+      ];
+      for (const [tool, input] of attempts) {
+        expect(checkToolCall(repo, tool, input).allowed, JSON.stringify(input)).toBe(false);
+      }
+    },
+  );
+
   it('refuses a path longer than any real one, before resolving it', () => {
     const long = `${'a/'.repeat(3000)}x`;
     expect(checkToolCall(repo, 'Read', { file_path: long }).allowed).toBe(false);

@@ -68,6 +68,17 @@ function isNetworkPath(p: string): boolean {
 type Located = { real: string } | { problem: string };
 
 /**
+ * Whether a repo-relative path holds a name Windows would rewrite: one ending in a dot or a
+ * space. Node opens such a name as written, so it can be a real folder inside the
+ * repository; ripgrep, going through the Win32 path rules, drops the dot or space and reads
+ * the name beside it instead, which can be a link out. No git checkout makes one.
+ */
+function rewrittenByWindows(relPath: string): boolean {
+  if (process.platform !== 'win32') return false;
+  return relPath.split(/[\\/]/).some((name) => /[. ]$/.test(name) && name !== '.' && name !== '..');
+}
+
+/**
  * Judges one path and, if it is allowed, says where it really is. `excluded` names repos in
  * the folder (the portfolio pass studies a folder of repos) that must stay out of reach.
  */
@@ -86,6 +97,14 @@ function locate(
   if (!isInside(path.resolve(repoRoot), lexical) && !isInside(realRoot, lexical)) return outside;
   const real = resolveReal(lexical);
   if (!isInside(realRoot, real)) return outside;
+  if (
+    rewrittenByWindows(path.relative(path.resolve(repoRoot), lexical)) ||
+    rewrittenByWindows(path.relative(realRoot, real))
+  ) {
+    return {
+      problem: `"${given}" has a name ending in a dot or a space, which Windows reads as another name`,
+    };
+  }
   // Judged as written and where it lands, so a link or a short name cannot reach .git either.
   // Always on repo-relative paths: a drive letter's colon is not a stream.
   if (
