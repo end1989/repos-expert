@@ -159,7 +159,9 @@ cheap ways to catch a confident, wrong document before someone acts on it.
 **Everything external is started from an argument array** — `execFile`, or `spawn` for
 ripgrep, whose output is streamed so a search can stop at its cap. No shell strings and no
 `shell: true` anywhere, and repo names are validated against `/^[A-Za-z0-9._-]+$/` before
-they reach a path or a command line.
+they reach a path or a command line. Programs are started by full path, found in the
+absolute folders on PATH (`src/which.ts`): by bare name, Windows looks in the working
+folder first, and git works inside repositories nobody vetted.
 
 **Nothing writes to stdout in the MCP path.** stdout *is* the protocol; a stray
 `console.log` corrupts the stream. Diagnostics go to stderr or nowhere.

@@ -1,9 +1,43 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { z } from 'zod';
+import { findOnPath } from './which.js';
 
-const run = promisify(execFile);
+const execFileAsync = promisify(execFile);
 const OPTS = { maxBuffer: 10 * 1024 * 1024 };
+
+interface RunOptions {
+  cwd?: string;
+  env?: NodeJS.ProcessEnv;
+  maxBuffer?: number;
+  timeout?: number;
+}
+
+const found = new Map<string, string>();
+
+/**
+ * Runs git or gh by its full path. By bare name a program is looked for first in the working
+ * folder, on Windows — and git runs inside the repositories being studied, where a committed
+ * git.exe would run in its place (see which.ts). Missing from PATH, a program fails as its
+ * bare name would have.
+ */
+async function run(
+  program: 'git' | 'gh',
+  args: string[],
+  options: RunOptions,
+): Promise<{ stdout: string; stderr: string }> {
+  let file = found.get(program);
+  if (file === undefined) {
+    // An .exe or .com, the files Windows starts without a shell.
+    const located = findOnPath(program, process.env, ['.exe', '.com']);
+    if (located === null) {
+      throw Object.assign(new Error(`${program} was not found on PATH`), { code: 'ENOENT' });
+    }
+    found.set(program, located);
+    file = located;
+  }
+  return execFileAsync(file, args, { ...options, encoding: 'utf8' });
+}
 
 /**
  * For commands that reach a remote. Never stop to ask for a password — a scheduled
