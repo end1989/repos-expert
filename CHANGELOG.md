@@ -191,7 +191,10 @@ patch bumps are fixes and additive changes). Dates are npm publish dates (UTC).
 - **Curator eval** (`npm run eval`): studies the agent-kit fixture with the real curator and
   grades the documents in code against `agent-kit/test-fixture/EXPECTED.md` — implemented
   versus README-only routes, unused security packages, stub handlers, the cross-repo link,
-  citations (the portfolio documents' too), privacy — reporting pass^k over `--trials`.
+  citations (the portfolio documents' too), privacy — reporting pass^k over `--trials`. Each
+  report records the commit, the Agent SDK version and every trial's folder. The graders
+  are themselves tested against maps real runs wrote: an earlier version passed three that
+  said the worker's poll gets a 404 and one that never graded the link Connected.
 - `list_repos` declares an output schema and returns structured content: each repo's state,
   current commit and docs commit as data, alongside the text.
 - `expert refresh --dry-run`, and a confirmation before a long refresh (`--yes` skips it).
@@ -205,6 +208,13 @@ patch bumps are fixes and additive changes). Dates are npm publish dates (UTC).
 
 ### Changed
 
+- **The portfolio pass follows each HTTP call to the handler that would serve it**,
+  matching the request the way the framework does: a route with a parameter answers paths
+  never registered by name, so "no route has that name" does not mean the call fails. It
+  says what the caller gets back and what it does with it, and grades a link that is wired
+  but broken as Connected. On the eval fixture it had concluded, in three runs of three,
+  that a poll answered with a 200 by `/orders/:id` would get a 404; with this, three runs
+  of three see the 200, and that the worker never checks it.
 - **Node 22.12 or newer.** `commander` 15 already required it, so `engines: >=20` was not
   true; Node 20 is past end of life. CI tests Node 22, 24 and 26.
 - `read_repo_file` returns at most 48 KB per call (was 200 KB), under the ~50,000

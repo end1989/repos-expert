@@ -82,11 +82,13 @@ the code wins and keeps live search beside the summaries. What this project does
   repository, and any that point at nothing are recorded in `meta.json` and printed.
 - **The curator has an eval.** `npm run eval` runs the real curator on a fixture with known
   answers — a README advertising five routes where the code has three, security packages
-  declared and never imported, stub handlers, two repos linked only by a port default — and
-  grades the result in code against
-  [agent-kit/test-fixture/EXPECTED.md](agent-kit/test-fixture/EXPECTED.md). On that fixture
+  declared and never imported, stub handlers, two repos linked only by a port default, and
+  a poll that a parameter route answers with a meaningless 200 — and grades the result in
+  code against [agent-kit/test-fixture/EXPECTED.md](agent-kit/test-fixture/EXPECTED.md).
+  The graders are themselves tested against wrong answers real runs gave. On that fixture
   the curator (`claude-sonnet-5`) passed all eight graders in three of three independent
-  trials, at about $0.16 a trial (November 2026).
+  trials, at about $0.19 a trial (November 2026). The poll is the hard one; the portfolio
+  prompt tells the curator to follow each HTTP call to the handler that would serve it.
 
 ## What it can reach, and what leaves your machine
 
