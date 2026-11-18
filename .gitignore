@@ -18,3 +18,6 @@ dist/
 
 # Personal knowledge base written by `expert curate` — kept in its own private repo.
 /knowledge/
+
+# Eval reports (npm run eval)
+evals/results/
