@@ -49,17 +49,31 @@ Breaking any of these is a vulnerability we want to hear about.
    `src/curator/confine.ts`): the session's tool set is exactly Read, Glob and Grep;
    anything not pre-approved is denied (`permissionMode: 'dontAsk'`, nothing bypassed); no
    user, project or local settings are loaded, so neither your own hooks and plugins nor a
-   `.claude/` folder inside the studied repository configure the agent; no MCP servers are
+   `.claude/` folder inside the studied repository configure the agent; your Claude Code
+   auto-memory for the folder is not read (`autoMemoryEnabled: false`), and your ripgrep
+   config (`RIPGREP_CONFIG_PATH`) is not passed on; no MCP servers are
    connected; and a PreToolUse hook judges every path as the runtime will use it —
    trimmed, with `~` and Git Bash drive paths (`/c/…`) expanded the way the runtime
    expands them after the hook has run — and refuses any path outside the repository (links
    followed to where they land), any path into `.git` (Windows aliases included), a network
    path (refused before anything resolves it: resolving `\\host\share` offers that host the
-   user's NTLM credentials), and on Windows a drive-relative path such as `C:secret`. A
-   Grep with no path relies on the runtime passing ripgrep `--glob !.git`; a Grep glob that
-   would bring `.git` back (`*`, `**/*` — in ripgrep the later glob wins) is refused. In the
-   portfolio pass, which reads the whole repos folder, excluded repos are refused too, and a
-   search must name one repo. Refused calls are counted in `meta.json`. What the tool itself
+   user's NTLM credentials), and on Windows a drive-relative path such as `C:secret` or a
+   name ending in a dot or a space, which Node opens as written but ripgrep reads, through
+   the Win32 path rules, as the name beside it. A
+   Grep with no path relies on the runtime passing ripgrep `--glob !.git`, and in ripgrep
+   the later glob wins, so a Grep glob that could match a folder named `.git` at any depth
+   is refused (`*`, `{.git,x}`, `vendor/**`). The glob is judged in the pieces the runtime
+   hands ripgrep, and syntax ripgrep could read differently from the hook is refused: a
+   backslash (an escape to ripgrep), a `}` that closes nothing (which the runtime's
+   ripgrep drops), a `[class]` holding `/` or opening with `!]` or `^]` (whose `]` ripgrep
+   reads as a member), a NEXT LINE character (which ripgrep trims and the runtime does not
+   split on). An absolute Glob pattern is judged by the
+   folder the runtime lists, the text before its first wildcard, trimmed as the runtime
+   trims it. The prompt is delivered as written (`verbatimPrompts`), so an `@path` in a
+   commit subject, a branch name or an earlier document does not make the runtime attach
+   that file, a read no hook would see. In the portfolio pass, which reads the whole repos
+   folder, excluded repos are refused too, and a search must name one repo. Refused calls
+   are counted in `meta.json`. What the tool itself
    reads from a studied repository, outside the agent — the manifests the portfolio pass
    quotes, the files the citation check counts lines in — is judged the same way: a link
    out of the repository is left unread.
@@ -118,17 +132,24 @@ Said plainly, because a control is only useful if you know where it stops:
   curator may send them to the model provider, and `read_repo_file` will serve them (the
   search tools skip hidden and gitignored files; a direct read does not). Point both at
   folders you would show the assistant anyway.
+- **The curator's Glob lists names inside `.git`.** The runtime's Glob excludes no
+  version-control folder, so a pattern such as `**/*` returns file names inside `.git`
+  (branch names among them, which the prompt carries anyway). Contents stay out: Read and
+  Grep refuse `.git`, and refusing `**/*` would cost the curator its most ordinary call.
 - **HTTP mode's token is a static bearer token**, not MCP's OAuth authorization, and TLS is
   your tunnel's job. Treat the token like a password.
 - **Staleness is commit-level.** Uncommitted changes in a working copy are not detected.
 - **Managed settings still apply.** If your organisation configures Claude Code through
   managed (enterprise) settings, the curator runs under them; that is by design.
 - **The hook mirrors this runtime.** It judges a path the way the bundled Claude Code reads
-  one (trimming, `~`, Git Bash drive paths, the glob order it hands ripgrep). Those details
-  were read from the runtime itself and are pinned by tests; a runtime that read paths
-  differently would need the hook to follow. A review found exactly that gap before
-  release — a leading space made `" ~/.ssh"` look like a folder inside the repository — so
-  a runtime upgrade is worth an end-to-end check, not just the unit tests.
+  one (trimming, `~`, Git Bash drive paths, how it splits a Grep glob and the order it
+  hands ripgrep the pieces). Those details were read from the runtime itself and are
+  pinned by tests; a runtime that read paths differently would need the hook to follow.
+  Reviews found exactly such gaps before release: a leading space made `" ~/.ssh"` look
+  like a folder inside the repository, and the runtime handed ripgrep `{.git,x}` in one
+  piece where the hook had read two. So the Agent SDK, which bundles the runtime, is pinned
+  to an exact version, and `npm run test:runtime` runs the real runtime against a fake
+  Messages API in CI, on every change and on every SDK bump.
 - **`githubUser` mirrors are hard-reset.** Repos pulled from a GitHub account are treated as
   disposable: `sync` resets them to the remote. Do not point `reposDir` at working copies
   while `githubUser` is set (repos listed in `repos.txt` are fast-forwarded instead, and

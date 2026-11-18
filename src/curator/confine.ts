@@ -1,7 +1,7 @@
 import path from 'node:path';
 import type { HookCallback } from '@anthropic-ai/claude-agent-sdk';
 import { isDriveRelative, isInside, namesGitDir, resolveReal } from '../paths.js';
-import { matchesGlob } from '../glob.js';
+import { couldMatchFolder, globProblem as unreadableGlob, matchesGlob } from '../glob.js';
 
 /**
  * The curator's reach, enforced in code rather than requested in the prompt.
@@ -68,6 +68,17 @@ function isNetworkPath(p: string): boolean {
 type Located = { real: string } | { problem: string };
 
 /**
+ * Whether a repo-relative path holds a name Windows would rewrite: one ending in a dot or a
+ * space. Node opens such a name as written, so it can be a real folder inside the
+ * repository; ripgrep, going through the Win32 path rules, drops the dot or space and reads
+ * the name beside it instead, which can be a link out. No git checkout makes one.
+ */
+function rewrittenByWindows(relPath: string): boolean {
+  if (process.platform !== 'win32') return false;
+  return relPath.split(/[\\/]/).some((name) => /[. ]$/.test(name) && name !== '.' && name !== '..');
+}
+
+/**
  * Judges one path and, if it is allowed, says where it really is. `excluded` names repos in
  * the folder (the portfolio pass studies a folder of repos) that must stay out of reach.
  */
@@ -86,6 +97,14 @@ function locate(
   if (!isInside(path.resolve(repoRoot), lexical) && !isInside(realRoot, lexical)) return outside;
   const real = resolveReal(lexical);
   if (!isInside(realRoot, real)) return outside;
+  if (
+    rewrittenByWindows(path.relative(path.resolve(repoRoot), lexical)) ||
+    rewrittenByWindows(path.relative(realRoot, real))
+  ) {
+    return {
+      problem: `"${given}" has a name ending in a dot or a space, which Windows reads as another name`,
+    };
+  }
   // Judged as written and where it lands, so a link or a short name cannot reach .git either.
   // Always on repo-relative paths: a drive letter's colon is not a stream.
   if (
@@ -107,26 +126,115 @@ const GLOB_MAGIC = /[*?[{]/;
 /** Paths inside a .git folder, as a glob would be tested against them. */
 const GIT_PROBES = ['.git', '.git/config', 'sub/.git/config'];
 
+/** A piece starting with `!` only excludes, so it cannot bring anything back. */
+const includes = (piece: string): boolean => piece.length > 0 && !piece.startsWith('!');
+
 /**
- * Whether a Grep glob would bring .git back into the search. The runtime passes ripgrep
- * `--glob !.git` and then the caller's globs, split on spaces and commas, and in ripgrep the
- * later glob wins: `*` alone re-includes .git/config. A glob the matcher cannot read is
- * treated as reaching it.
+ * The pieces a Grep glob reaches ripgrep as: the runtime splits it on whitespace, keeps a
+ * word holding both `{` and `}` whole, splits every other word on commas, and passes each
+ * piece as its own `--glob`.
  */
-function reachesGitDir(glob: string): boolean {
-  const pieces = [glob, ...glob.split(/[\s,]+/)].filter((g) => g.length > 0 && !g.startsWith('!'));
-  return pieces.some((g) => {
-    try {
-      return GIT_PROBES.some((probe) => matchesGlob(g, probe));
-    } catch {
-      return true;
+function piecesForRipgrep(glob: string): string[] {
+  return glob
+    .split(/\s+/)
+    .flatMap((word) => (word.includes('{') && word.includes('}') ? [word] : word.split(',')))
+    .filter(includes);
+}
+
+/**
+ * Every way of reading a Grep glob: the pieces above, and the glob split on whitespace and
+ * every comma, so a runtime that also split `{…}` words would meet a refusal too. (Read
+ * unsplit, an inclusion beside an exclusion, "*.ts,!dist/**", would be judged as one glob
+ * ending in **: a refusal of something ripgrep is never handed.)
+ */
+function everyReading(glob: string): string[] {
+  return [...new Set([...glob.split(/[\s,]+/), ...piecesForRipgrep(glob)])].filter(includes);
+}
+
+/**
+ * Whether a piece uses syntax that ripgrep and this check could read differently. The
+ * runtime's ripgrep (14.1) drops a `}` that closes nothing, so `.gi}t` is `.git`; a [class]
+ * holding `/` is one character to ripgrep (`[.-/]git` is `.git`) but is split at the slash
+ * here, and one holding `,`, `{` or `}` is split or grouped differently; after a negation,
+ * ripgrep reads the first `]` as a member (`[!]]` is "not ]", so `.gi[!]]` is `.git`) where
+ * this matcher closes the class; versions disagree on an unclosed `{` or `[`. ripgrep also
+ * trims a trailing NEXT LINE (U+0085), which the runtime does not split on, being outside
+ * JavaScript's \s: "*" + U+0085 reaches ripgrep as "*". No glob anyone means needs any of
+ * it. (Nested groups are left to the matcher, which refuses them with its own reason.)
+ */
+function readsAmbiguously(piece: string): boolean {
+  if (piece.includes('\u0085')) return true;
+  let depth = 0;
+  for (let i = 0; i < piece.length; i++) {
+    const c = piece[i];
+    if (c === '[') {
+      if (['!]', '^]'].includes(piece.slice(i + 1, i + 3))) return true;
+      const end = piece.indexOf(']', i + 2);
+      if (end === -1 || /[/\\,{}[]/.test(piece.slice(i + 1, end))) return true;
+      i = end;
+    } else if (c === '{') {
+      depth++;
+    } else if (c === '}') {
+      if (depth === 0) return true;
+      depth--;
     }
-  });
+  }
+  return depth > 0;
+}
+
+/**
+ * Why a Grep glob could bring .git back into the search, or null. The runtime passes ripgrep
+ * `--glob !.git` and then the caller's pieces, and in ripgrep the later glob wins: a piece
+ * that matches a folder named .git, at any depth, lets the search into it — `*`, `{.git,x}`,
+ * and `vendor/**`, which opens vendor/lib/.git. A backslash is an escape to ripgrep (`.gi\t`
+ * is `.git`) but a folder separator to this matcher, so a glob holding one is refused rather
+ * than misjudged; so is a piece this matcher cannot read, or could read differently.
+ */
+function grepGlobProblem(given: string): string | null {
+  // As written: the runtime hands a Grep glob to ripgrep without trimming or expanding it.
+  if (given.includes('\\')) {
+    return `the pattern "${given}" contains "\\", which ripgrep reads as an escape, not a folder separator: write folders with "/"`;
+  }
+  if (piecesForRipgrep(given).some(readsAmbiguously)) {
+    return `the pattern "${given}" has a } that closes nothing, an unclosed { or [, a [...] holding / , { or }, one opening with !] or ^], or a NEXT LINE character, which ripgrep and this check could read differently`;
+  }
+  for (const piece of everyReading(given)) {
+    const unreadable = unreadableGlob(piece);
+    if (unreadable !== null) return `the pattern "${given}" cannot be checked: ${unreadable}`;
+    if (
+      // A leading drive's colon is not a stream name, as in globProblem.
+      namesGitDir(piece.replace(/^[A-Za-z]:(?=\/|$)/, '')) ||
+      couldMatchFolder(piece, '.git') ||
+      GIT_PROBES.some((probe) => matchesGlob(piece, probe))
+    ) {
+      return `the pattern "${given}" could let the search into a .git folder, which is not part of the source. To search a whole folder, give it as the path`;
+    }
+  }
+  return null;
+}
+
+/**
+ * The folder the runtime lists for an absolute pattern, or null for a relative one, which
+ * only filters what lies under the search folder. The runtime cuts the pattern at the last
+ * separator in front of its first wildcard, or takes the pattern's own folder when it has
+ * none, and trims what it cut: so "<repo>/.. /*" lists the repository's parent.
+ */
+function absoluteGlobFolder(pattern: string): string | null {
+  if (!path.isAbsolute(pattern)) return null;
+  const wildcard = pattern.search(GLOB_MAGIC);
+  if (wildcard === -1) return path.dirname(pattern);
+  // Where the runtime cuts: at "/" or this platform's separator. Off Windows a backslash is
+  // part of a name, so cutting there would judge a deeper folder than the runtime lists.
+  const cut = Math.max(pattern.lastIndexOf('/', wildcard), pattern.lastIndexOf(path.sep, wildcard));
+  const folder = cut <= 0 ? path.parse(pattern).root : pattern.slice(0, cut);
+  // "C:" alone is the current folder on drive C; the pattern meant the drive's root.
+  return /^[A-Za-z]:$/.test(folder) ? `${folder}${path.sep}` : folder;
 }
 
 /**
  * A glob can leave the repository on its own: `../**`, or an absolute pattern. Any `..`
- * segment is refused outright; an absolute pattern is judged by its fixed leading part.
+ * segment is refused outright; an absolute pattern is judged by the folder the runtime lists,
+ * exactly as a `path` would be.
  */
 function globProblem(
   repoRoot: string,
@@ -140,30 +248,29 @@ function globProblem(
   const segments = glob.split(/[\\/]/);
   const outside = `the pattern "${given}" reaches outside the repository being studied`;
   if (isHomeRelative(glob) || isDriveRelative(glob) || isNetworkPath(glob)) return outside;
-  if (segments.includes('..')) return outside;
+  // `..`, also with trailing spaces or dots, which the runtime trims or Windows drops.
+  if (segments.some((segment) => /^\.\.[\s.]*$/u.test(segment))) return outside;
   // A leading drive ("C:") is not a stream name; every other segment is checked.
   const tail = /^[A-Za-z]:$/.test(segments[0] ?? '') ? segments.slice(1) : segments;
-  if (namesGitDir(tail.join('/')) || (tool === 'Grep' && reachesGitDir(glob))) {
+  if (namesGitDir(tail.join('/'))) {
     return `the pattern "${given}" reaches into .git, which is not part of the source`;
   }
-  if (!path.isAbsolute(glob)) return null;
-  const fixed: string[] = [];
-  for (const segment of segments) {
-    if (GLOB_MAGIC.test(segment)) break;
-    fixed.push(segment);
+  if (tool === 'Grep') {
+    const problem = grepGlobProblem(given);
+    if (problem !== null) return problem;
   }
-  let base = fixed.join(path.sep) || path.sep;
-  // "C:" alone is the current folder on drive C; the pattern meant the drive's root.
-  if (/^[A-Za-z]:$/.test(base)) base += path.sep;
-  const lexical = path.resolve(repoRoot, base);
-  if (!isInside(path.resolve(repoRoot), lexical) && !isInside(realRoot, lexical)) return outside;
-  const real = resolveReal(lexical);
-  if (!isInside(realRoot, real)) return outside;
-  if (excluded.size > 0) {
-    const repo = (path.relative(realRoot, real).split(path.sep)[0] ?? '').toLowerCase();
-    if (repo === '' || excluded.has(repo)) {
-      return `the pattern "${given}" covers a repository that is excluded from study`;
-    }
+  const folder = absoluteGlobFolder(glob);
+  if (folder === null) return null;
+  const located = locate(repoRoot, realRoot, folder, excluded);
+  if ('problem' in located) {
+    // A Grep glob only filters what is under the search folder, so the fix is to write it
+    // from there.
+    return tool === 'Grep'
+      ? `the pattern "${given}" is written from the root: write a Grep glob relative to the search folder (such as "src/*.ts") and give that folder as the path`
+      : `the pattern "${given}" lists a folder: ${located.problem}`;
+  }
+  if (excluded.size > 0 && path.relative(realRoot, located.real) === '') {
+    return `the pattern "${given}" covers a repository that is excluded from study`;
   }
   return null;
 }

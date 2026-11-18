@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { matchesGlob, matchesAnyGlob, pathFilter } from '../src/glob.js';
+import { couldMatchFolder, matchesGlob, matchesAnyGlob, pathFilter } from '../src/glob.js';
 
 /**
  * The refresh fast path decides "only docs changed" with these patterns, against
@@ -140,5 +140,27 @@ describe('matchesAnyGlob', () => {
 
   it('normalises backslashes so Windows callers get the same answer', () => {
     expect(matchesAnyGlob('docs\\a.txt', ['docs/**'])).toBe(true);
+  });
+});
+
+describe('couldMatchFolder', () => {
+  it('is true when some folder of that name, at any depth, would match', () => {
+    const opening = ['*', '**', '.*', '.git', '.gi?', '{.git,x}', '{x,.gi}t', '*/', 'src/'];
+    for (const glob of [...opening, 'vendor/**', 'alpha/*', '**/lib/.git']) {
+      expect(couldMatchFolder(glob, '.git'), glob).toBe(true);
+    }
+  });
+
+  it('is false when the last segment can never be that name', () => {
+    for (const glob of ['*.ts', 'src/**/*.ts', '{src,lib}/**/*.js', '.github/*.yml', '.git/x']) {
+      expect(couldMatchFolder(glob, '.git'), glob).toBe(false);
+    }
+  });
+
+  it('reads a [class] as any one character, so a class read differently can only widen it', () => {
+    // ripgrep and this matcher have disagreed on classes ("[.-/]"): judged as "?", a class
+    // can make the answer "could", never "could not".
+    expect(couldMatchFolder('.[!g]it', '.git')).toBe(true);
+    expect(couldMatchFolder('*.[jt]s', '.git')).toBe(false);
   });
 });

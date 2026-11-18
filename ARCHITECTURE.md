@@ -103,9 +103,11 @@ so its privileges are fixed in `src/curator/agent.ts`: the built-in tool set is 
 Read, Glob and Grep (`tools` — `allowedTools` only pre-approves and restricts nothing),
 anything else is denied (`permissionMode: 'dontAsk'`), no user/project/local settings are
 loaded (`settingSources: []`, so the studied repo's own `.claude/` cannot configure it), no
-MCP servers are connected, and a PreToolUse hook (`confine.ts`) refuses any path outside the
-repository, following links. Each of these is tested, and the whole was checked against a
-live session.
+MCP servers are connected, the operator's auto-memory is not read, the prompt is delivered
+as written (`verbatimPrompts`, so an `@path` in a commit subject attaches nothing), and a
+PreToolUse hook (`confine.ts`) refuses
+any path outside the repository, following links. Each of these is tested, and the whole is
+tested against the real runtime the SDK bundles (`npm run test:runtime`, below).
 
 **A retry is a second paid run.** Only failures another attempt could fix are retried —
 unparseable output, an unknown error. A timeout, a spent `curateMaxBudgetUsd`, a rejected
@@ -172,6 +174,17 @@ change what they see. The curator is tested with an injected agent runner and an
 tokens. The MCP tools are tested through an in-memory client/server pair, and the built CLI
 is launched as a real stdio server to check that stdout carries only JSON-RPC. Coverage is
 measured with thresholds (`npm run test:coverage`).
+
+`npm run test:runtime` starts the real Claude Code runtime the Agent SDK bundles, through
+the curator's own runner and prompt builder, against a fake Messages API on 127.0.0.1. The
+fake model asks for reads outside the repository and into `.git`, the prompt carries
+`@path` mentions, and the studied repository carries its own `CLAUDE.md`, hooks and MCP
+server. The test fails if anything planted outside the allowed area reaches a request, or
+if any of the repository's configuration is loaded. A control session, with the hook
+removed and the other protections switched off, shows every attack succeeds and every
+planted configuration that this runtime can load is loaded; a corpus of Grep globs is judged
+by the ripgrep inside the runtime. It spends no tokens; CI runs it on Linux, macOS and
+Windows.
 
 `npm run eval` is the one test that spends model tokens: the real curator on the agent-kit
 fixture, graded in code, with pass^k over `--trials`. Run it after changing a prompt or the

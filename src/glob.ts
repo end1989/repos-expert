@@ -221,6 +221,23 @@ export function matchesGlob(pattern: string, relPath: string): boolean {
   return compile(pattern).alternatives.some((alt) => matchSegments(alt, path));
 }
 
+const anyForClass = (atom: Atom): Atom => (atom.kind === 'class' ? { kind: 'any' } : atom);
+
+/**
+ * Whether `pattern` could match some path whose last segment is `name`, wherever that path
+ * is. In ripgrep a glob that matches a folder lets the search into it, so this judges a glob
+ * by the folders it could open. A trailing `**` matches whatever lies beneath, so it always
+ * could. A `[class]` is read as any one character: ripgrep and this matcher have read
+ * classes differently, and read this way a class can only turn "could not" into "could".
+ * Throws, like `matchesGlob`, on a pattern `globProblem` reports.
+ */
+export function couldMatchFolder(pattern: string, name: string): boolean {
+  return compile(pattern).alternatives.some((alt) => {
+    const last = alt.at(-1);
+    return last === '**' || (last !== undefined && matchSegment(last.map(anyForClass), name));
+  });
+}
+
 export function matchesAnyGlob(relPath: string, patterns: readonly string[]): boolean {
   return patterns.some((g) => matchesGlob(g, relPath));
 }

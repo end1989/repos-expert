@@ -67,11 +67,33 @@ jobs:
       # packs the package for real (it needs npm's execpath in the environment).
       - run: npm test
 
+  # The curator's confinement against the real Claude Code runtime the Agent SDK bundles,
+  # driven by a fake Messages API on 127.0.0.1: no tokens, no secrets, no network. The hook
+  # mirrors how this runtime reads paths and globs, so every bump of the SDK runs it here.
+  runtime:
+    name: runtime confinement (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run test:runtime
+
   # The one check to require in branch protection: green only when everything above is.
   ci-ok:
     name: ci-ok
     if: always()
-    needs: [check, test]
+    needs: [check, test, runtime]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -79,8 +101,9 @@ jobs:
         env:
           CHECK: ${{ needs.check.result }}
           TEST: ${{ needs.test.result }}
+          RUNTIME: ${{ needs.runtime.result }}
         run: |
-          if [ "$CHECK" != "success" ] || [ "$TEST" != "success" ]; then
-            echo "::error::check=$CHECK test=$TEST"
+          if [ "$CHECK" != "success" ] || [ "$TEST" != "success" ] || [ "$RUNTIME" != "success" ]; then
+            echo "::error::check=$CHECK test=$TEST runtime=$RUNTIME"
             exit 1
           fi

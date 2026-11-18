@@ -97,9 +97,42 @@ describe('checkToolCall — what the curator may touch', () => {
     expect(checkToolCall(repo, 'Glob', { pattern: '~/**/*.pem' }).allowed).toBe(false);
   });
 
+  it('judges an absolute Glob pattern by the folder the runtime lists, trimmed as it trims it', () => {
+    // The runtime lists the text before the last separator in front of the first wildcard,
+    // trimmed: "<repo>/.. /*" lists the repository's parent. Names only, but names of
+    // anything beside the repository.
+    const r = repo.replace(/\\/g, '/');
+    for (const gap of [' ', '\t', ' ', '　']) {
+      for (const pattern of [`${r}/..${gap}/*`, `${r}/..${gap}/[s]*/*`, `${r}/..${gap}/x.txt`]) {
+        expect(checkToolCall(repo, 'Glob', { pattern }).allowed, JSON.stringify(pattern)).toBe(
+          false,
+        );
+      }
+    }
+    expect(checkToolCall(repo, 'Glob', { pattern: `${r}/.git\t/**` }).allowed).toBe(false);
+  });
+
+  it.runIf(process.platform !== 'win32')(
+    'cuts an absolute Glob pattern only where this platform separates folders, as the runtime does',
+    () => {
+      // Off Windows a backslash is part of a name: the runtime lists the repository's parent
+      // with the glob "<repo>\-*/**", which ripgrep reads as "<repo>-*/**" — the siblings.
+      const pattern = `${repo}\\-*/**`;
+      expect(checkToolCall(repo, 'Glob', { pattern }).allowed, pattern).toBe(false);
+    },
+  );
+
+  it('tells the model to write a Grep glob from the search folder, not from the root', () => {
+    const decision = checkToolCall(repo, 'Grep', { pattern: 'x', glob: '/src/*.ts' });
+    expect(decision.allowed).toBe(false);
+    expect(decision.allowed ? '' : decision.reason).toMatch(/relative to the search folder/);
+  });
+
   it('accepts an absolute glob that stays inside the repository', () => {
     const inside = `${repo.replace(/\\/g, '/')}/src/**/*.ts`;
     expect(checkToolCall(repo, 'Glob', { pattern: inside })).toEqual({ allowed: true });
+    // A drive letter's colon is not a stream name, in a Grep glob either.
+    expect(checkToolCall(repo, 'Grep', { pattern: 'x', glob: inside })).toEqual({ allowed: true });
   });
 
   it('keeps the agent out of .git, where a remote URL can carry a token into the docs', () => {
@@ -153,6 +186,97 @@ describe('checkToolCall — what the curator may touch', () => {
     }
   });
 
+  it('reads a Grep glob in the pieces the runtime hands ripgrep, keeping {…} words whole', () => {
+    // The runtime splits on whitespace, keeps a word holding both { and } whole, and splits
+    // only the other words on commas. Split on every comma, "{.git,x}" looks like two harmless
+    // halves; ripgrep gets it whole, and it lets .git back in.
+    for (const glob of ['{.git,x} {config,y}', '{.gi,x}t c{o,x}nfig', 'src/*.ts {.git,x}']) {
+      expect(checkToolCall(repo, 'Grep', { pattern: 'url', glob }).allowed, glob).toBe(false);
+    }
+  });
+
+  it('refuses a backslash in a Grep glob, which ripgrep reads as an escape, not a folder', () => {
+    // ".gi\t" is ".git" to ripgrep; read as a folder separator it looked like ".gi/t".
+    for (const glob of ['.gi\\t c\\onfig', '.\\git c\\onfig', 'src\\**\\*.ts']) {
+      const decision = checkToolCall(repo, 'Grep', { pattern: 'url', glob });
+      expect(decision.allowed, glob).toBe(false);
+      expect(decision.allowed ? '' : decision.reason, glob).toMatch(/escape/);
+    }
+  });
+
+  it('refuses a Grep glob that would let ripgrep into a .git folder at any depth', () => {
+    // A glob that matches a folder named .git, wherever it is, outranks the runtime's
+    // --glob !.git: "vendor/**" opens vendor/lib/.git, "*/" opens every folder.
+    for (const glob of ['vendor/**', 'vendor/** config', '*/ config', '**', 'src/**']) {
+      expect(checkToolCall(repo, 'Grep', { pattern: 'url', glob }).allowed, glob).toBe(false);
+    }
+    const decision = checkToolCall(repo, 'Grep', { pattern: 'url', glob: 'src/**' });
+    expect(decision.allowed ? '' : decision.reason).toMatch(/as the path/);
+  });
+
+  it('still allows the Grep globs a curator actually writes', () => {
+    const everyday = [
+      '*.ts',
+      '*.{ts,tsx}',
+      'src/**/*.ts',
+      '**/*.md',
+      '!*.md',
+      '{src,lib}/**/*.js',
+      '*.test.ts *.spec.ts',
+      'docs/*.md,*.txt',
+      'package.json',
+      '.github/workflows/*.yml',
+      // An exclusion after an inclusion: judged piece by piece, never as one glob.
+      '**/*.ts !**/node_modules/**',
+      '*.ts,!dist/**',
+    ];
+    for (const glob of everyday) {
+      expect(checkToolCall(repo, 'Grep', { pattern: 'url', glob }), glob).toEqual({
+        allowed: true,
+      });
+    }
+  });
+
+  it('says why a glob it cannot read is refused', () => {
+    const decision = checkToolCall(repo, 'Grep', { pattern: 'url', glob: '{a,{b,c}}' });
+    expect(decision.allowed ? '' : decision.reason).toMatch(/Nested/);
+  });
+
+  it('refuses Grep glob syntax that ripgrep and this check could read differently', () => {
+    // The runtime's ripgrep (14.1) drops a } that closes nothing, so ".gi}t" is ".git"; a
+    // [class] holding / is one character to ripgrep ("[.-/]git" is ".git") but is split at
+    // the slash here. An unclosed { or [ means different things in different versions.
+    const ambiguous = [
+      '.gi}t .gi}t/conf?g',
+      '[.-/]git [.-/]git/conf?g',
+      '.gi[t/] .gi[t/]/*',
+      // After a negation, ripgrep reads the first ] as a member: "[!]]" is "not ]".
+      '.gi[!]] .gi[!]]/conf?g',
+      '.gi[^]] .gi[^]]/conf?g',
+      '.gi[!]x] .gi[!]x]/conf?g',
+      '[!]]*',
+      // ripgrep trims a trailing NEXT LINE (U+0085) from a glob; JavaScript's \s, which the
+      // runtime splits on, does not include it, so "*" + U+0085 reaches ripgrep as "*".
+      '*\u0085',
+      'vendor/**\u0085',
+      '{src',
+      'src/[ab',
+      '[,]x',
+      '[{]x}',
+    ];
+    for (const glob of ambiguous) {
+      const decision = checkToolCall(repo, 'Grep', { pattern: 'url', glob });
+      expect(decision.allowed, glob).toBe(false);
+      expect(decision.allowed ? '' : decision.reason, glob).toMatch(/read differently/);
+    }
+  });
+
+  it('refuses a Grep glob whose last folder could be any folder, a nested .git included', () => {
+    for (const glob of ['vendor/*/* vendor/*/*/*', 'src/**/*', '{src,vendor}/**', '*a/**']) {
+      expect(checkToolCall(repo, 'Grep', { pattern: 'url', glob }).allowed, glob).toBe(false);
+    }
+  });
+
   it('refuses a network path without touching the network', () => {
     // Resolving \\host\share on Windows connects to that host and offers it the user's
     // NTLM credentials, so a network path must be refused before anything resolves it.
@@ -181,6 +305,30 @@ describe('checkToolCall — what the curator may touch', () => {
       fs.symlinkSync(outside, path.join(repo, 'x}'), 'junction');
       const pattern = `${repo.replace(/\\/g, '/')}/x}/*.txt`;
       expect(checkToolCall(repo, 'Glob', { pattern }).allowed).toBe(false);
+    },
+  );
+
+  it.runIf(process.platform === 'win32' && linkOk)(
+    'refuses a name Windows would rewrite: one ending in a dot or a space',
+    () => {
+      // Node opens "xd." as written; ripgrep drops the trailing dot as Win32 does and
+      // searches "xd" — here a link out of the repository. Such names come from archives,
+      // not from git, which refuses to check them out.
+      fs.mkdirSync(`\\\\?\\${path.join(repo, 'xd.')}`);
+      fs.writeFileSync(`\\\\?\\${path.join(repo, 'xd.', 'decoy.txt')}`, 'decoy\n');
+      fs.symlinkSync(outside, path.join(repo, 'xd'), 'junction');
+      const r = repo.replace(/\\/g, '/');
+      const attempts: [string, Record<string, unknown>][] = [
+        ['Grep', { pattern: 'x', path: 'xd.' }],
+        ['Glob', { pattern: '*', path: 'xd.' }],
+        ['Glob', { pattern: `${r}/xd./*` }],
+        ['Read', { file_path: `${r}/xd./decoy.txt` }],
+        ['Grep', { pattern: 'x', path: 'escape.' }], // no such folder: the link itself, dotted
+        ['Grep', { pattern: 'x', path: 'src /index.ts' }],
+      ];
+      for (const [tool, input] of attempts) {
+        expect(checkToolCall(repo, tool, input).allowed, JSON.stringify(input)).toBe(false);
+      }
     },
   );
 
