@@ -117,31 +117,112 @@ export function gradeOrdersApi(docs: Readonly<Record<string, string>>): Grade[] 
   ];
 }
 
+/** A markdown document's sections: each heading with what follows it, up to the next one. */
+function sections(md: string): string[] {
+  const out: string[] = [];
+  let current: string[] = [];
+  for (const line of md.split('\n')) {
+    if (/^#{1,6}\s/.test(line) && current.length > 0) {
+      out.push(current.join('\n'));
+      current = [];
+    }
+    current.push(line);
+  }
+  out.push(current.join('\n'));
+  return out;
+}
+
+const NOT_CONNECTED = /\b(?:not|never|no|nothing)\s+connected\b|n['’]t\s+connected\b/i;
+
+/**
+ * Whether a section grades something Connected. A map states its grades in headings, bold
+ * labels and table cells; prose that merely uses the word — an introduction promising to
+ * separate "what is connected" from the rest — grades nothing, and nor does "Not connected".
+ */
+function gradesConnected(section: string): boolean {
+  const lines = section.split('\n');
+  const labels = [
+    ...lines.filter((l) => /^#{1,6}\s/.test(l)),
+    ...(section.match(/\*\*[^*\n]+\*\*/g) ?? []),
+    ...lines
+      .filter((l) => l.trimStart().startsWith('|'))
+      .flatMap((row) => row.split('|'))
+      .map((cell) => cell.replace(/[*`_]/g, '').trim())
+      .filter((cell) => /^connected\b/i.test(cell)),
+  ];
+  return labels.some((l) => /\bconnected\b/i.test(l) && !NOT_CONNECTED.test(l));
+}
+
+/** A status right after a negation ("not a 404", "rather than a 404") is not stated. */
+const NEGATED =
+  /(?:\b(?:not|never|no|rather than|instead of)|n['’]t)(?:\s+(?:a|an|the|any|get|gets|return|returns|be|with))*\s*[`'"(]*$/i;
+/** Nor is one that is only expected ("you might expect a 404"). */
+const HEDGED =
+  /\b(?:expect(?:s|ed)?|assum(?:e|es|ed)|might|seem(?:s|ed)?|appear(?:s|ed)?|looks? like)\b[^.\n]{0,25}$/i;
+
+/** Whether `text` states the HTTP status `code` as what happens. */
+function statesStatus(text: string, code: RegExp): boolean {
+  for (const m of text.matchAll(code)) {
+    const before = text.slice(Math.max(0, m.index - 40), m.index);
+    if (!NEGATED.test(before) && !HEDGED.test(before)) return true;
+  }
+  return false;
+}
+
+/** `pending` taken for the id: the response it gets, or the parameter it binds to. */
+const PENDING_AS_ID = [
+  /\{\s*["'`]?id["'`]?\s*:\s*["'`]pending["'`]\s*\}/i,
+  /\bpending\b[^.\n]{0,60}\b(?:as|into|to)\b[^.\n]{0,25}(?::id\b|req\.params\.id)/i,
+];
+
+/** Whether the map sees /orders/:id answer the worker's request. */
+function seesIdRouteAnswer(map: string): boolean {
+  if (PENDING_AS_ID.some((re) => re.test(map))) return true;
+  return map
+    .split(/(?<=[.!?])\s+|\n/)
+    .some((sentence) => /:id\b|pending/i.test(sentence) && statesStatus(sentence, /\b200\b/g));
+}
+
+/** Cites both ends of the link: the worker's default URL or fetch, and the API's port. */
+function citesBothSides(text: string): boolean {
+  return (
+    (cites(text, 'worker.js', 1) || cites(text, 'worker.js', 4)) &&
+    (cites(text, 'server.js', 3) || cites(text, 'server.js', 9))
+  );
+}
+
 /** Grades cross-repo-map.md against EXPECTED.md sections 5 and 6. */
 export function gradeCrossRepo(crossRepoMap: string): Grade[] {
-  const connected =
-    /\bconnected\b/i.test(crossRepoMap) &&
-    crossRepoMap.includes('order-worker') &&
-    crossRepoMap.includes('orders-api') &&
-    (cites(crossRepoMap, 'worker.js', 1) || cites(crossRepoMap, 'worker.js', 4)) &&
-    (cites(crossRepoMap, 'server.js', 3) || cites(crossRepoMap, 'server.js', 9));
-  const noOp = /\/orders\/pending/.test(crossRepoMap) && /:id\b/.test(crossRepoMap);
+  const connected = sections(crossRepoMap).some((s) => gradesConnected(s) && citesBothSides(s));
+
+  // Where the map discusses the worker's poll, it must not say the poll gets a 404: it gets a
+  // 200 from /orders/:id. A 404 said of some other route elsewhere is no concern of this grade.
+  const aboutThePoll = crossRepoMap.split(/\n\s*\n/).filter((p) => /pending|\bpoll/i.test(p));
+  const says404 = aboutThePoll.some((p) => statesStatus(p, /\b404\b/g));
+  const sees = /\/orders\/pending/.test(crossRepoMap) && seesIdRouteAnswer(crossRepoMap);
+  const noOp = sees && !says404;
   return [
     {
       id: 'cross-repo-link',
-      title: 'order-worker → orders-api is graded Connected, with both sides cited',
+      title:
+        'order-worker → orders-api is graded Connected, with both sides cited under that grade',
       required: true,
       pass: connected,
       detail: connected
         ? 'graded Connected with evidence on both sides'
-        : 'missing the grade or the citations on one side',
+        : 'no section grades the link Connected and cites both sides',
     },
     {
       id: 'silent-no-op',
-      title: '(stretch) /orders/pending is seen to match /orders/:id and return a meaningless 200',
+      title:
+        '(stretch) /orders/pending is seen to reach /orders/:id — a 200 with { id: "pending" }, not a 404',
       required: false,
       pass: noOp,
-      detail: noOp ? 'found' : 'not found — reasoning about Express routing, not search',
+      detail: noOp
+        ? 'found'
+        : says404
+          ? 'says the poll gets a 404 — /orders/:id answers it with a 200'
+          : 'not found — reasoning about Express routing, not search',
     },
   ];
 }
