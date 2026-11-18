@@ -32,7 +32,10 @@ export function sectionFor(lines, ver) {
       break;
     }
   }
-  return lines.slice(start + 1, end).join('\n').trim();
+  return lines
+    .slice(start + 1, end)
+    .join('\n')
+    .trim();
 }
 
 const body = sectionFor(changelog, version);
@@ -41,5 +44,10 @@ const footer =
   `npm: https://www.npmjs.com/package/repos-expert/v/${version} · ` +
   `full changelog: https://github.com/${repo}/blob/main/CHANGELOG.md`;
 
-process.stdout.write((body && body.length > 0 ? body : `Release ${version}. See CHANGELOG.md.`) + footer + '\n');
-if (body === null) console.error(`release-notes: no "## [${version}]" section in CHANGELOG.md — using a generic note`);
+process.stdout.write(
+  (body && body.length > 0 ? body : `Release ${version}. See CHANGELOG.md.`) + footer + '\n',
+);
+if (body === null)
+  console.error(
+    `release-notes: no "## [${version}]" section in CHANGELOG.md — using a generic note`,
+  );

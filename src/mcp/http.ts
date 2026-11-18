@@ -1,9 +1,9 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import http from 'node:http';
-import { createRequire } from 'node:module';
 import type { AddressInfo } from 'node:net';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { VERSION } from '../version.js';
 
 /**
  * The MCP server over Streamable HTTP, for clients that only speak HTTP — Copilot
@@ -14,14 +14,18 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
  *   on loopback: a browser tab can reach 127.0.0.1 too. If none is given, one is
  *   generated and printed to stderr once.
  * - **Stateless.** One McpServer and one transport per request; the tools are read-only
- *   and per-request construction is cheap. No sessions to leak or expire.
- * - **DNS-rebinding protection on loopback.** The Host header must be a loopback host;
- *   on a non-loopback bind the caller has chosen to be reachable and the token is the
- *   control.
+ *   and per-request construction is cheap. No sessions to leak or expire, and so nothing
+ *   to stream: only POST is served.
+ * - **DNS-rebinding protection on loopback.** The Host header must name a loopback host
+ *   and this port; on a non-loopback bind the caller has chosen to be reachable and the
+ *   token is the control.
+ * - **No cross-site browser requests.** A request carrying an Origin header must come
+ *   from a page served on this machine, as the MCP transport spec requires servers to
+ *   check.
+ * - **Nothing a client sends can crash the process.** Every request is handled inside one
+ *   catch; a request target that does not parse is a 400, not an exception.
  * - **No express.** Node's http is enough; the SDK transport does the protocol.
  */
-
-const { version: VERSION } = createRequire(import.meta.url)('../../package.json') as { version: string };
 
 export interface HttpOptions {
   host: string;
@@ -60,37 +64,124 @@ export function tokenMatches(header: string | undefined, token: string): boolean
   return given.length === want.length && timingSafeEqual(given, want);
 }
 
-function json(res: http.ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}): void {
+function json(
+  res: http.ServerResponse,
+  status: number,
+  body: unknown,
+  headers: Record<string, string> = {},
+): void {
   res.writeHead(status, { 'content-type': 'application/json', ...headers });
   res.end(JSON.stringify(body));
 }
 
-const rpcError = (code: number, message: string) => ({ jsonrpc: '2.0', error: { code, message }, id: null });
+const rpcError = (code: number, message: string) => ({
+  jsonrpc: '2.0',
+  error: { code, message },
+  id: null,
+});
+
+/** The path part of a request target, or null when it does not parse. The host is irrelevant here. */
+function requestPath(target: string | undefined): string | null {
+  try {
+    return new URL(target ?? '/', 'http://localhost').pathname;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether a Host header names this loopback server: a loopback host, and this port when
+ * it gives one. Anything else on a loopback bind is a DNS-rebinding attempt.
+ */
+export function isOwnLoopbackHost(hostHeader: string | undefined, port: number): boolean {
+  if (hostHeader === undefined) return false;
+  let url: URL;
+  try {
+    url = new URL(`http://${hostHeader}`);
+  } catch {
+    return false;
+  }
+  return isLoopback(url.hostname) && (url.port === '' || Number(url.port) === port);
+}
+
+/** Whether an Origin header belongs to a page served from this machine. */
+export function isLoopbackOrigin(origin: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(origin);
+  } catch {
+    return false; // includes the literal "null" an opaque origin sends
+  }
+  return (url.protocol === 'http:' || url.protocol === 'https:') && isLoopback(url.hostname);
+}
 
 /**
  * Starts listening. `makeServer` is called once per request — pass a closure over the
  * config (or the setup-mode server when there is none).
  */
-export async function startHttp(makeServer: () => McpServer, opts: HttpOptions): Promise<HttpHandle> {
+export async function startHttp(
+  makeServer: () => McpServer,
+  opts: HttpOptions,
+): Promise<HttpHandle> {
   const mcpPath = opts.path ?? '/mcp';
   const loopback = isLoopback(opts.host);
   let boundPort = opts.port;
 
-  const server = http.createServer(async (req, res) => {
-    const url = new URL(req.url ?? '/', `http://${opts.host}`);
-
-    if (url.pathname === '/health' && req.method === 'GET') {
+  async function handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    const pathname = requestPath(req.url);
+    if (pathname === null) {
+      json(res, 400, rpcError(-32600, 'Bad request: the request target is not a valid path.'));
+      return;
+    }
+    if (pathname === '/health' && req.method === 'GET') {
       json(res, 200, { ok: true, name: 'repos-expert', version: VERSION, mcp: mcpPath });
       return;
     }
-    if (url.pathname !== mcpPath) {
-      json(res, 404, rpcError(-32601, `Not found. The MCP endpoint is ${mcpPath}; /health says who this is.`));
+    if (pathname !== mcpPath) {
+      json(
+        res,
+        404,
+        rpcError(-32601, `Not found. The MCP endpoint is ${mcpPath}; /health says who this is.`),
+      );
+      return;
+    }
+    if (loopback && !isOwnLoopbackHost(req.headers.host, boundPort)) {
+      json(
+        res,
+        403,
+        rpcError(
+          -32000,
+          'Forbidden: this server only answers requests addressed to its loopback address.',
+        ),
+      );
+      return;
+    }
+    const origin = req.headers.origin;
+    if (origin !== undefined && !isLoopbackOrigin(origin)) {
+      json(res, 403, rpcError(-32000, 'Forbidden: cross-site requests are not accepted.'));
       return;
     }
     if (!tokenMatches(req.headers.authorization, opts.token)) {
-      json(res, 401, rpcError(-32001, 'Unauthorized: this server needs "Authorization: Bearer <token>" — the token was printed when it started.'), {
-        'www-authenticate': 'Bearer realm="repos-expert"',
-      });
+      json(
+        res,
+        401,
+        rpcError(
+          -32001,
+          'Unauthorized: this server needs "Authorization: Bearer <token>" — the token was printed when it started.',
+        ),
+        {
+          'www-authenticate': 'Bearer realm="repos-expert"',
+        },
+      );
+      return;
+    }
+    if (req.method !== 'POST') {
+      json(
+        res,
+        405,
+        rpcError(-32000, 'Method not allowed: this stateless server answers POST only.'),
+        { allow: 'POST' },
+      );
       return;
     }
 
@@ -98,24 +189,22 @@ export async function startHttp(makeServer: () => McpServer, opts: HttpOptions):
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
       enableJsonResponse: true,
-      enableDnsRebindingProtection: loopback,
-      allowedHosts: loopback
-        ? [`127.0.0.1:${boundPort}`, `localhost:${boundPort}`, `[::1]:${boundPort}`, '127.0.0.1', 'localhost', '[::1]']
-        : undefined,
     });
     res.on('close', () => {
       void transport.close();
       void mcp.close();
     });
-    try {
-      await mcp.connect(transport);
-      await transport.handleRequest(req, res);
-    } catch (err) {
+    await mcp.connect(transport);
+    await transport.handleRequest(req, res);
+  }
+
+  const server = http.createServer((req, res) => {
+    handle(req, res).catch((err: unknown) => {
       // stderr only; never a stack trace to the client.
       console.error(`repos-expert http: ${err instanceof Error ? err.message : String(err)}`);
       if (!res.headersSent) json(res, 500, rpcError(-32603, 'Internal error'));
       else res.end();
-    }
+    });
   });
 
   await new Promise<void>((resolve, reject) => {
@@ -125,8 +214,12 @@ export async function startHttp(makeServer: () => McpServer, opts: HttpOptions):
       resolve();
     });
   });
-  boundPort = (server.address() as AddressInfo).port;
-  const hostForUrl = opts.host.includes(':') && !opts.host.startsWith('[') ? `[${opts.host}]` : opts.host;
+  const address: AddressInfo | string | null = server.address();
+  if (address === null || typeof address === 'string')
+    throw new Error('The HTTP server did not report a TCP address.');
+  boundPort = address.port;
+  const hostForUrl =
+    opts.host.includes(':') && !opts.host.startsWith('[') ? `[${opts.host}]` : opts.host;
 
   return {
     url: `http://${hostForUrl}:${boundPort}${mcpPath}`,

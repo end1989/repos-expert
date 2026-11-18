@@ -1,4 +1,4 @@
-import { DEFAULT_REFRESH_IGNORE, type ExpertConfig } from '../config.js';
+import type { ExpertConfig } from '../config.js';
 import { changedFilesSince } from '../git.js';
 import { matchesAnyGlob } from '../glob.js';
 import { markVerified, type RepoStatus } from '../registry.js';
@@ -58,7 +58,7 @@ export async function partitionStale(
   /** 'dry-run' classifies without recording anything — for `--dry-run`. */
   mode: 'apply' | 'dry-run' = 'apply',
 ): Promise<Partition> {
-  const ignore = cfg.refreshIgnore ?? DEFAULT_REFRESH_IGNORE;
+  const ignore = cfg.refreshIgnore;
   const out: Partition = { curate: [], reverified: [] };
   for (const s of candidates) {
     if (s.state !== 'stale' || s.curatedSha === null) {

@@ -2,10 +2,10 @@ name: Release
 
 # Publishes to npm with provenance and cuts a GitHub Release whenever a `v*` tag is
 # pushed. Nothing here needs a stored npm token: the job authenticates to npm via
-# GitHub's OIDC token ("trusted publishing"), which is configured once on npmjs.com under
-# the package's Settings → Trusted Publisher (repository end1989/repos-expert, workflow
-# release.yml). Provenance requires the repository to be public and `repository.url` in
-# package.json to point at it — both true.
+# GitHub's OIDC token ("trusted publishing"), configured once on npmjs.com under the
+# package's Settings → Trusted Publisher (this repository, workflow release.yml).
+# Provenance requires the repository to be public and `repository.url` in package.json
+# to point at it — both true.
 #
 # Cut a release with:   npm version patch   &&   git push --follow-tags
 # (`npm version` bumps package.json, commits, and tags; the tag push triggers this.)
@@ -14,31 +14,28 @@ on:
   push:
     tags: ['v*']
 
-permissions:
-  contents: write   # create the GitHub Release
-  id-token: write   # OIDC token for npm trusted publishing + provenance
+permissions: {}
 
 jobs:
   publish:
     name: publish ${{ github.ref_name }} to npm (with provenance) and GitHub Releases
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write # create the GitHub Release
+      id-token: write # OIDC token for npm trusted publishing + provenance
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0 # the "on main" check below needs main's history
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
-          cache: npm
-
-      # Trusted publishing needs npm >= 11.5.1; be explicit rather than trusting the
-      # runner image.
-      - run: npm install -g npm@latest
-      - run: npm --version
-
-      - run: npm ci
-      - run: npm run build
-      - run: npm test
+          # No dependency cache in the job that publishes: a poisoned cache would ship.
+          package-manager-cache: false
 
       - name: tag must match package.json version
         run: |
@@ -49,21 +46,60 @@ jobs:
             exit 1
           fi
 
-      - name: publish to npm
-        # prepublishOnly builds and tests again — that is the same safety net a manual
-        # publish gets, kept on purpose.
-        run: npm publish --provenance --access public
+      # Only reviewed code ships: a tag pushed from a branch or a local commit is refused.
+      - name: tag must point at a commit on main
+        run: |
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::$GITHUB_REF_NAME points at $GITHUB_SHA, which is not on main"
+            exit 1
+          fi
+
+      # Found the way scripts/release-notes.mjs finds it, which otherwise falls back to a
+      # generic note rather than fail.
+      - name: CHANGELOG.md must have a section for this version
+        run: |
+          if ! node -e '
+            const heading = `## [${process.argv[1]}]`;
+            const lines = require("fs").readFileSync("CHANGELOG.md", "utf8").split(/\r?\n/);
+            process.exit(lines.some((l) => l.startsWith(heading)) ? 0 : 1);
+          ' "${GITHUB_REF_NAME#v}"; then
+            echo "::error::CHANGELOG.md has no '## [${GITHUB_REF_NAME#v}]' section; move the [Unreleased] entries under it"
+            exit 1
+          fi
+
+      # Trusted publishing needs npm >= 11.5.1. Node 24 bundles a newer npm 11; this
+      # checks that rather than installing whatever npm@latest is on the day.
+      - name: npm can publish with trusted publishing
+        run: |
+          node -e '
+            const [major, minor, patch] = process.argv[1].split(".").map(Number);
+            const ok = major > 11 || (major === 11 && (minor > 5 || (minor === 5 && patch >= 1)));
+            if (!ok) { console.error(`npm ${process.argv[1]} is older than 11.5.1`); process.exit(1); }
+          ' "$(npm --version)"
+
+      - run: npm ci
+      - run: npm run check
+
+      # Everything the release needs is built before the publish, which cannot be undone:
+      # a step that fails here stops the job while nothing has shipped. Both files go to
+      # the runner's temp folder, outside the package, so they can never be packed.
+      - name: software bill of materials
+        run: npm sbom --sbom-format cyclonedx --omit dev > "$RUNNER_TEMP/sbom.cdx.json"
 
       - name: release notes from CHANGELOG.md
         run: |
-          node scripts/release-notes.mjs "${GITHUB_REF_NAME#v}" > release-notes.md
-          echo "--- release-notes.md ---"; cat release-notes.md
+          node scripts/release-notes.mjs "${GITHUB_REF_NAME#v}" > "$RUNNER_TEMP/release-notes.md"
+          echo "--- release-notes.md ---"; cat "$RUNNER_TEMP/release-notes.md"
+
+      - name: publish to npm
+        # prepublishOnly runs the same checks again — the safety net a manual publish gets.
+        run: npm publish --provenance --access public
 
       - name: GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
+          gh release create "$GITHUB_REF_NAME" "$RUNNER_TEMP/sbom.cdx.json" \
             --title "$GITHUB_REF_NAME" \
-            --notes-file release-notes.md \
+            --notes-file "$RUNNER_TEMP/release-notes.md" \
             --verify-tag

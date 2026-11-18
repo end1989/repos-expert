@@ -1,0 +1,7 @@
+# Prettier 3 also reads .gitignore, which already keeps it out of repos/, knowledge/,
+# personal config and eval results.
+dist/
+coverage/
+node_modules/
+package-lock.json
+agent-kit/test-fixture/

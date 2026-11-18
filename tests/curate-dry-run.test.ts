@@ -25,7 +25,11 @@ interface Run {
   knowledgeDir: string;
 }
 
-function runCurate(args: string[], repos: 'alpha' | 'empty' | 'absent' = 'alpha'): Run {
+function runCurate(
+  args: string[],
+  repos: 'alpha' | 'empty' | 'absent' = 'alpha',
+  command = 'curate',
+): Run {
   const tmp = makeTempDir('expert-dryrun-');
   const trace = path.join(tmp, 'trace.txt');
   fs.writeFileSync(trace, '');
@@ -38,9 +42,12 @@ function runCurate(args: string[], repos: 'alpha' | 'empty' | 'absent' = 'alpha'
     fs.mkdirSync(path.join(tmp, 'repos', 'not-a-repo'), { recursive: true });
   }
   const configPath = path.join(tmp, 'expert.config.json');
-  fs.writeFileSync(configPath, JSON.stringify({ reposDir: './repos', knowledgeDir: './knowledge' }));
+  fs.writeFileSync(
+    configPath,
+    JSON.stringify({ reposDir: './repos', knowledgeDir: './knowledge' }),
+  );
 
-  const res = spawnSync(process.execPath, ['--import', PRELOAD, CLI, 'curate', ...args], {
+  const res = spawnSync(process.execPath, ['--import', PRELOAD, CLI, command, ...args], {
     cwd: tmp,
     env: {
       ...process.env,
@@ -65,7 +72,12 @@ function runCurate(args: string[], repos: 'alpha' | 'empty' | 'absent' = 'alpha'
 function curatorLoads(loaded: string): string[] {
   return loaded
     .split('\n')
-    .filter((l) => l.includes('claude-agent-sdk') || l.includes('/dist/curator/') || l.includes('/dist/cli/curate-many.js'));
+    .filter(
+      (l) =>
+        l.includes('claude-agent-sdk') ||
+        l.includes('/dist/curator/') ||
+        l.includes('/dist/cli/curate-many.js'),
+    );
 }
 
 describe('expert curate --dry-run', () => {
@@ -129,5 +141,15 @@ describe('expert curate --dry-run', () => {
     const run = runCurate(['no-such-repo', '--dry-run']);
     expect(run.status).not.toBe(0);
     expect(curatorLoads(run.loaded)).toEqual([]);
+  });
+});
+
+describe('expert refresh --dry-run', () => {
+  it('says what it would study and that nothing was spent, without syncing or loading the curator', () => {
+    const run = runCurate(['--dry-run'], 'alpha', 'refresh');
+    expect(run.status, run.stderr).toBe(0);
+    expect(run.stdout).toMatch(/nothing (was )?(spent|studied)/i);
+    expect(curatorLoads(run.loaded)).toEqual([]);
+    expect(fs.existsSync(path.join(run.knowledgeDir, 'portfolio.md'))).toBe(false);
   });
 });

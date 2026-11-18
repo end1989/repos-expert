@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { makeFixture } from './mcp-fixture.js';
+import { makeFixture, resultText } from './mcp-fixture.js';
 
 /**
  * The same knowledge the tools serve, exposed as MCP resources so clients that attach
@@ -9,9 +9,7 @@ import { makeFixture } from './mcp-fixture.js';
  * `card` per repo; the other docs are reachable through the template and completion.
  */
 
-function textOf(res: { contents: Array<{ text?: string }> }): string {
-  return res.contents.map((c) => c.text ?? '').join('\n');
-}
+const textOf = resultText;
 
 describe('MCP resources', () => {
   let client: Client;
@@ -41,8 +39,12 @@ describe('MCP resources', () => {
   });
 
   it('reads the portfolio and cross-repo map', async () => {
-    expect(textOf(await client.readResource({ uri: 'expert://portfolio' }))).toContain('alpha, beta, gamma');
-    expect(textOf(await client.readResource({ uri: 'expert://cross-repo-map' }))).toContain('No links yet');
+    expect(textOf(await client.readResource({ uri: 'expert://portfolio' }))).toContain(
+      'alpha, beta, gamma',
+    );
+    expect(textOf(await client.readResource({ uri: 'expert://cross-repo-map' }))).toContain(
+      'No links yet',
+    );
   });
 
   it('reads a repo doc with the same provenance footer the tool adds', async () => {
@@ -65,8 +67,12 @@ describe('MCP resources', () => {
   });
 
   it('refuses an unknown repo and an unknown doc name', async () => {
-    await expect(client.readResource({ uri: 'expert://repos/nope/card' })).rejects.toThrow(/Unknown repo/);
-    await expect(client.readResource({ uri: 'expert://repos/alpha/secrets' })).rejects.toThrow(/doc must be one of/);
+    await expect(client.readResource({ uri: 'expert://repos/nope/card' })).rejects.toThrow(
+      /Unknown repo/,
+    );
+    await expect(client.readResource({ uri: 'expert://repos/alpha/secrets' })).rejects.toThrow(
+      /doc must be one of/,
+    );
     await expect(client.readResource({ uri: 'expert://repos/../card' })).rejects.toThrow();
   });
 

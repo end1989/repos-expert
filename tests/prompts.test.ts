@@ -43,6 +43,64 @@ describe('parseCuratedDocs', () => {
       'Curator output missing docs: architecture.md, map.md, activity.md, interfaces.md',
     );
   });
+
+  it('marks output without the documents as worth one more attempt', () => {
+    let thrown: unknown;
+    try {
+      parseCuratedDocs('I looked around and ran out of time.', DOC_FILES);
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toMatchObject({
+      name: 'CuratorError',
+      kind: 'malformed-output',
+      retryable: true,
+    });
+  });
+
+  it('reports a known complaint as that failure, not as missing documents', () => {
+    let thrown: unknown;
+    try {
+      parseCuratedDocs('Invalid API key · Fix external API key', DOC_FILES);
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toMatchObject({ name: 'CuratorError', kind: 'auth', retryable: false });
+    expect(String(thrown)).toMatch(/ANTHROPIC_API_KEY/);
+  });
+});
+
+describe('prompt and parser agree', () => {
+  // The prompt once promised "exactly the four documents" while the parser required five,
+  // so a model that obeyed the prompt failed the parse and was paid to run again.
+  const NUMBER_WORDS = [
+    'zero',
+    'one',
+    'two',
+    'three',
+    'four',
+    'five',
+    'six',
+    'seven',
+    'eight',
+    'nine',
+  ];
+  const claimedCount = (prompt: string): number[] =>
+    [...prompt.matchAll(/exactly the (\w+) documents/g)].map((m) => {
+      const word = m[1]!.toLowerCase();
+      return NUMBER_WORDS.includes(word) ? NUMBER_WORDS.indexOf(word) : Number(word);
+    });
+
+  it('asks the repo curator for as many documents as the parser requires', () => {
+    const p = buildRepoPrompt({ name: 'alpha', gitLog: 'abc first', branches: '* main' });
+    expect(claimedCount(p)).toEqual([DOC_FILES.length]);
+    for (const file of DOC_FILES) expect(p).toContain(`===FILE: ${file}===`);
+  });
+
+  it('asks the portfolio curator for exactly its two documents', () => {
+    const p = buildPortfolioPrompt({ cards: { alpha: 'a' }, manifests: {} });
+    expect(claimedCount(p)).toEqual([2]);
+  });
 });
 
 describe('buildRepoPrompt', () => {
@@ -107,5 +165,18 @@ describe('buildPortfolioPrompt', () => {
     expect(p).toContain('summaries, not primary sources');
     expect(p).toContain('Verify before asserting');
     expect(p).toContain('No evidence of a connection');
+  });
+
+  it('grades a link by what ties the repos together, not by whether the integration works', () => {
+    const p = buildPortfolioPrompt({ cards: { alpha: 'a' }, manifests: {} });
+    expect(p).toContain('A grade describes the link, not whether it works');
+    expect(p).toContain('wired but broken is still **Connected**');
+  });
+
+  it('follows each HTTP call to the handler that would actually serve it, and what comes back', () => {
+    const p = buildPortfolioPrompt({ cards: { alpha: 'a' }, manifests: {} });
+    expect(p).toContain('follow the call to the handler that would actually serve it');
+    expect(p).toMatch(/route with a parameter or a wildcard[^.]*also matches/);
+    expect(p).toContain('what the caller would get back');
   });
 });

@@ -8,7 +8,7 @@ import { SERVER_INSTRUCTIONS, provenanceFooter } from '../src/mcp/server.js';
 describe('telling the client how much to trust the docs', () => {
   it('grants permission to go read the code, and says the code wins', () => {
     expect(SERVER_INSTRUCTIONS).toMatch(/repositories are open to you/i);
-    expect(SERVER_INSTRUCTIONS).toMatch(/do not need permission/i);
+    expect(SERVER_INSTRUCTIONS).toMatch(/no side effects/i);
     expect(SERVER_INSTRUCTIONS).toMatch(/the code wins/i);
   });
 
@@ -23,6 +23,7 @@ describe('telling the client how much to trust the docs', () => {
       currentSha: 'b'.repeat(40),
       curatedSha: 'a'.repeat(40),
       curatedAt: '2026-08-11T00:00:00Z',
+      verifiedThrough: null,
       state: 'stale',
     });
     expect(footer).toContain('written at aaaaaaa');

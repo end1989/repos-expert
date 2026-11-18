@@ -1,6 +1,17 @@
 import { describe, it, expect } from 'vitest';
+import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
 import path from 'node:path';
-import { parseRepoList, revParseHead, gitLogOneline, listBranches, listGithubRepos, gitLogRangeStat, updateMirror, changedFilesSince } from '../src/git.js';
+import {
+  parseRepoList,
+  revParseHead,
+  gitLogOneline,
+  listBranches,
+  listGithubRepos,
+  gitLogRangeStat,
+  updateMirror,
+  changedFilesSince,
+} from '../src/git.js';
 import { makeTempDir, initGitRepo, commitFile } from './helpers.js';
 
 describe('parseRepoList', () => {
@@ -12,11 +23,21 @@ describe('parseRepoList', () => {
         defaultBranchRef: { name: 'master' },
         isArchived: false,
       },
-      { name: 'empty', url: 'https://github.com/u/empty', defaultBranchRef: null, isArchived: true },
+      {
+        name: 'empty',
+        url: 'https://github.com/u/empty',
+        defaultBranchRef: null,
+        isArchived: true,
+      },
     ]);
     const repos = parseRepoList(json);
     expect(repos).toEqual([
-      { name: 'alpha', url: 'https://github.com/u/alpha', defaultBranch: 'master', isArchived: false },
+      {
+        name: 'alpha',
+        url: 'https://github.com/u/alpha',
+        defaultBranch: 'master',
+        isArchived: false,
+      },
       { name: 'empty', url: 'https://github.com/u/empty', defaultBranch: 'main', isArchived: true },
     ]);
   });
@@ -70,6 +91,24 @@ describe('changedFilesSince', () => {
     const files = await changedFilesSince(dir, base);
     expect(files.sort()).toEqual(['README.md', 'src/deep/b.ts']);
     expect(await changedFilesSince(dir, await revParseHead(dir))).toEqual([]);
+  });
+
+  it('reports both sides of a rename, so code moved under docs/ still counts as a code change', async () => {
+    const dir = path.join(makeTempDir('expert-git-'), 'repo');
+    initGitRepo(dir);
+    const base = commitFile(dir, 'src/app.ts', 'export const app = 1;\n', 'base');
+    fs.mkdirSync(path.join(dir, 'docs'));
+    execFileSync('git', ['mv', 'src/app.ts', 'docs/app.ts'], { cwd: dir });
+    execFileSync('git', ['commit', '-m', 'move'], { cwd: dir });
+    expect((await changedFilesSince(dir, base)).sort()).toEqual(['docs/app.ts', 'src/app.ts']);
+  });
+
+  it('returns unusual file names as they are, not quoted the way git prints them', async () => {
+    const dir = path.join(makeTempDir('expert-git-'), 'repo');
+    initGitRepo(dir);
+    const base = commitFile(dir, 'a.txt', 'a', 'base');
+    commitFile(dir, 'docs/naïve guide.md', 'n', 'unicode');
+    expect(await changedFilesSince(dir, base)).toEqual(['docs/naïve guide.md']);
   });
 
   it('rejects a malformed sha and fails on an unknown one instead of guessing', async () => {

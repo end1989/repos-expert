@@ -32,7 +32,9 @@ Then `expert refresh <name>` studies a project, and Claude Desktop can answer ab
 ## How it works
 
 `expert curate` sends a read-only Claude agent into each repository to write five
-markdown docs: what it does (`card`), how it's built (`architecture`), where everything
+markdown docs — read-only in code, not by request: the agent's session has the Read, Glob
+and Grep tools and nothing else, cannot read outside the repository it is studying, and
+loads none of your own settings, hooks or MCP servers: what it does (`card`), how it's built (`architecture`), where everything
 lives (`map`), what was recently worked on (`activity`), and its verified contract
 surface — routes, commands, exports, env vars, data models, each citing the file and
 line that defines it (`interfaces`). A final pass maps the relationships between them.
@@ -43,19 +45,62 @@ serves those docs *plus* live ripgrep search and file reads over the real code, 
 questions are answered from the source rather than the summary. Every doc is stamped
 with the commit it was written at, and anything stale is flagged in the answer.
 
+After each run, every `file:line` the docs cite is checked against the repository, and
+what the run cost — dollars, tokens, turns, time — is recorded beside the commit stamp.
+
 `expert sync` clones whatever `repos.txt` lists, and can additionally mirror an entire
 GitHub account if you set `githubUser`. Both are conveniences — the folder is the source
 of truth, and copying or cloning projects in yourself works identically. Listed projects
 are updated with a fast-forward pull, so a repo you also work in never loses commits.
+**Repos mirrored from a GitHub account are different: `sync` hard-resets them to the
+remote.** Don't point `reposDir` at working copies while `githubUser` is set.
+
+## The tools
+
+| Tool | What it answers |
+| --- | --- |
+| `portfolio_overview` | What exists, how the repos connect, which docs are stale — start here |
+| `list_repos` | Every repo, a one-line summary, fresh / stale / uncurated — also as structured data |
+| `get_repo_knowledge` | One written doc: `card`, `architecture`, `map`, `activity`, `interfaces` |
+| `search_knowledge` | The written docs, searched |
+| `search_code` | The current source, searched (regex, or `literal: true`) |
+| `find_files` | Files by glob |
+| `read_repo_file` | One file, in parts of up to 2,000 lines / 48 KB |
+
+The docs are also resources: `expert://portfolio`, `expert://cross-repo-map`, and
+`expert://repos/{repo}/{doc}`. Every tool is read-only and says so in its annotations.
+
+## How you know the docs are right
+
+You don't, entirely — a model wrote them, which is why the server tells your assistant that
+the code wins and keeps live search beside the summaries. What this project does about it:
+
+- **Every doc is stamped with its commit**, and a doc older than the code carries a warning
+  wherever it is served.
+- **Every citation is checked.** `interfaces.md` must cite the `file:line` that defines each
+  route, command or export; after each run those citations are checked against the
+  repository, and any that point at nothing are recorded in `meta.json` and printed.
+- **The curator has an eval.** `npm run eval` runs the real curator on a fixture with known
+  answers — a README advertising five routes where the code has three, security packages
+  declared and never imported, stub handlers, two repos linked only by a port default, and
+  a poll that a parameter route answers with a meaningless 200 — and grades the result in
+  code against [agent-kit/test-fixture/EXPECTED.md](agent-kit/test-fixture/EXPECTED.md).
+  The graders are themselves tested against wrong answers real runs gave. On that fixture
+  the curator (`claude-sonnet-5`) passed all eight graders in three of three independent
+  trials, at about $0.19 a trial (November 2026). The poll is the hard one; the portfolio
+  prompt tells the curator to follow each HTTP call to the handler that would serve it.
 
 ## What it can reach, and what leaves your machine
 
 - **It reads two folders:** your projects folder (`reposDir`) and its own knowledge folder.
   Every MCP file operation is confined to a named repo under `reposDir` — repo names are
   validated, paths are resolved and `realpath`-checked, and anything that escapes is
-  refused. Symlinks pointing out of a repo are refused too.
+  refused. Symlinks pointing out of a repo are refused too, nothing inside `.git` is
+  served, and a search glob can narrow a search but never widen it past `.gitignore`.
+- **The curator can only read, and only the repo it is studying** — enforced in its session
+  options and by a hook that refuses any other path, not left to the prompt.
 - **Results are capped** so a single tool call cannot flood the model's context: 100 search
-  matches, 2,000 lines / 200 KB per file read.
+  results, 2,000 lines / 48 KB per file read, 30 seconds per search.
 - **No telemetry, no phoning home.** The tool itself makes no network calls. The only
   things that leave your machine are `git`/`gh` traffic during `sync`/`add`, and — during
   `curate`/`refresh` only — the code the curator reads, which goes to whichever model
@@ -73,7 +118,7 @@ See [SECURITY.md](SECURITY.md) for how to report a problem.
 
 ## What you need
 
-- **Node 20+** — required.
+- **Node 22.12+** — required.
 - **A folder of repositories** — required. That is the whole input.
 - **An MCP client** to ask questions from: Claude Desktop, Claude Code, or VS Code with
   GitHub Copilot. Any MCP-aware client works; this is a standard stdio MCP server.
@@ -91,9 +136,8 @@ To hack on the tool itself:
 
     git clone https://github.com/end1989/repos-expert.git && cd repos-expert
     npm ci
-    npm run build
+    npm run check                                      # typecheck, lint, format, build, test
     cp expert.config.example.json expert.config.json   # then edit reposDir
-    npm test
 
 ## Use
 
@@ -101,9 +145,10 @@ To hack on the tool itself:
     expert init                # first run: write config, connect to Claude Desktop
     expert add <url>…          # add projects to repos.txt and clone them
     expert doctor              # check the setup and say what to fix
-    expert status              # what was found, and what has been studied
+    expert status              # what was found, and what has been studied (--json too)
     expert refresh <name>…     # study specific repos (adds them if never studied)
     expert refresh             # update everything, re-study what changed, then the portfolio
+    expert refresh --dry-run   # what that would study, and cost, without doing it
     expert sync                # clone/update everything in repos.txt (and GitHub, if configured)
     expert curate --stale      # study everything not yet studied — slow, uses the model
     expert curate --stale --dry-run   # what that would study, and cost, without doing it
@@ -115,15 +160,16 @@ To hack on the tool itself:
 as pasting the full clone URL.
 
 Batches over 10 repos print a time and cost estimate and ask before starting; `--yes`
-skips the question, `--dry-run` answers it without spending anything.
+skips the question, `--dry-run` answers it without spending anything. Each finished repo
+prints what it actually cost, and `curateMaxBudgetUsd` in the config caps a single run.
 
 From a clone, substitute `node dist/cli/index.js` for `expert`.
 
 Batches curate several repos at once — `curateConcurrency` in `expert.config.json`
 (default 2, max 16), overridable per run with `curate --concurrency <n>`. Raise it to
 finish a large backlog sooner; above 4 the API tends to throttle, and a throttled repo
-that hits `curateTimeoutMinutes` costs double because it is retried. Drop it to `1` if
-you are being rate-limited.
+that hits `curateTimeoutMinutes` is reported as failed, not retried — run it again later.
+Drop it to `1` if you are being rate-limited.
 
 `refresh` with no arguments never curates repos that have no docs yet — with a large
 account that could be hours of model time. Add repos to the knowledge base explicitly:
@@ -132,8 +178,9 @@ stale repo's only changes since curation are markdown, `docs/`, `.github/`, lice
 changelogs or lockfiles (`refreshIgnore` in the config; set it to `[]` to turn this off),
 the repo is *re-verified* — recorded as unchanged in code through HEAD, no model run —
 and the docs' provenance footer says so. Naming a repo (`refresh <name>`) always studies
-it. Only one refresh can run at a time (lockfile in `knowledge/`; the
-error message tells you where if a crashed run leaves it behind). The lock only guards refresh against refresh — don't run `refresh` while a `curate --all`/`--stale` batch is active.
+it. Only one run that writes docs goes at a time: `refresh` and `curate` share a lockfile in
+`knowledge/`. A lock left by a run that crashed is taken over once its process is gone; while
+the process is still running, the error names the file.
 
 ## Connect your AI tools
 
@@ -143,10 +190,11 @@ installed, offline, with no PATH guesswork — and `npm update -g repos-expert` 
 up on the next launch. `expert doctor` reports which version the client would launch and
 flags a mismatch, or a path that has moved (re-run `expert init` to re-point it).
 
-Everything else is the same server. If you write a config by hand, use
-`npx -y repos-expert@latest mcp` — the `@latest` matters: a bare `npx repos-expert` runs
-whichever copy npm finds first and keeps running it, so a global install silently stays at
-its installed version. From a clone the command is `node <project>/dist/cli/index.js mcp`.
+Everything else is the same server. If you write a config by hand, name a version:
+`npx -y repos-expert@<version> mcp` runs exactly the release you chose, and `@latest`
+follows new releases automatically. Avoid a bare `npx repos-expert` — it runs whichever
+copy npm finds first and keeps running it, so a global install silently stays at its
+installed version. From a clone the command is `node <project>/dist/cli/index.js mcp`.
 
 **Claude Code (CLI):**
 
@@ -209,7 +257,9 @@ config file. `--config` is a global option, so it works on every command includi
 entry, `repos-expert-work`, that launches the server with `--config`; the default
 profile stays `repos-expert`. `expert doctor` (with or without `--config`) reports the
 entry that belongs to *that* profile. Without `--name` the label comes from the config
-file's folder.
+file's name (`work.json` → `work`), or its folder for an `expert.config.json`; two configs
+kept in one folder get separate knowledge bases (`knowledge-work`, `knowledge-personal`).
+A label already registered for a different collection is refused rather than replaced.
 
 ## Backing up, and moving to another computer
 
@@ -236,6 +286,21 @@ Inspect `<knowledgeDir>/repos/<name>/` — the docs should read like someone act
 explored the code, and `expert status` should show the repo `fresh`. Always do this on
 one repo before starting a large batch.
 
+## Limitations
+
+- **The docs are a model's summary.** They are checked (commits, citations, an eval) but not
+  guaranteed; treat them as leads and the code as the answer.
+- **Studying costs model time**: roughly 2–4 minutes per repo, from a few cents to about a
+  dollar depending on its size and the model. Searching and serving cost nothing.
+- **Staleness is per commit.** Uncommitted changes in a working copy are not noticed.
+- **It serves what is in the folder** — including anything secret that someone committed.
+- **MCP protocol 2025-11-25.** The server is built on the v1 TypeScript SDK, as the Claude
+  Agent SDK it depends on is; 2026 clients reach it through their fallback. Moving to the
+  v2 SDK and protocol 2026-07-28 is planned.
+- **Windows is the verified platform**; macOS and Linux run the full test suite in CI. The
+  scheduling helper in `scripts/` is PowerShell (Windows Task Scheduler); elsewhere, run
+  `expert refresh` from cron or launchd.
+
 ## Project
 
 - [CHANGELOG.md](CHANGELOG.md) — what changed in each version; releases are also on
@@ -244,5 +309,4 @@ one repo before starting a large batch.
   vulnerability.
 - [CONTRIBUTING.md](CONTRIBUTING.md) — how the code is organised and what a change needs
   before it merges. [ARCHITECTURE.md](ARCHITECTURE.md) is the design tour.
-- MIT licensed. Windows is the verified platform; macOS and Linux are built and tested in
-  CI on every push.
+- MIT licensed.

@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { curatorEnvFrom, describeProvider, isValidEnvKey, parseClaudeAuthOutput } from '../src/provider.js';
+import {
+  curatorEnvFrom,
+  describeProvider,
+  isValidEnvKey,
+  parseClaudeAuthOutput,
+} from '../src/provider.js';
 
 describe('describeProvider', () => {
   const sub = { hasClaudeCode: true };
@@ -41,10 +46,18 @@ describe('describeProvider', () => {
   });
 
   it('says "signed in" only when the auth probe says so — and names the account type, never the account', () => {
-    const p = describeProvider({}, {
-      hasClaudeCode: true,
-      claudeAuth: { loggedIn: true, authMethod: 'claude.ai', subscriptionType: 'max', email: 'someone@example.com' },
-    });
+    const p = describeProvider(
+      {},
+      {
+        hasClaudeCode: true,
+        claudeAuth: {
+          loggedIn: true,
+          authMethod: 'claude.ai',
+          subscriptionType: 'max',
+          email: 'someone@example.com',
+        },
+      },
+    );
     expect(p.kind).toBe('subscription');
     expect(p.detail).toMatch(/signed in/i);
     expect(p.detail).toContain('claude.ai');
@@ -66,7 +79,10 @@ describe('describeProvider', () => {
   });
 
   it('an API key still wins over a signed-in Claude Code — that is what would be billed', () => {
-    const p = describeProvider({ ANTHROPIC_API_KEY: 'sk-ant-secret' }, { hasClaudeCode: true, claudeAuth: { loggedIn: true } });
+    const p = describeProvider(
+      { ANTHROPIC_API_KEY: 'sk-ant-secret' },
+      { hasClaudeCode: true, claudeAuth: { loggedIn: true } },
+    );
     expect(p.kind).toBe('api-key');
   });
 
@@ -76,14 +92,20 @@ describe('describeProvider', () => {
   });
 
   it('a custom endpoint counts even without Claude Code signed in', () => {
-    const p = describeProvider({ ANTHROPIC_BASE_URL: 'http://localhost:4000' }, { hasClaudeCode: false });
+    const p = describeProvider(
+      { ANTHROPIC_BASE_URL: 'http://localhost:4000' },
+      { hasClaudeCode: false },
+    );
     expect(p.kind).toBe('custom-endpoint');
   });
 });
 
 describe('curatorEnvFrom', () => {
   it('layers config over the process environment', () => {
-    const env = curatorEnvFrom({ PATH: '/bin', ANTHROPIC_BASE_URL: 'http://old' }, { ANTHROPIC_BASE_URL: 'http://new' });
+    const env = curatorEnvFrom(
+      { PATH: '/bin', ANTHROPIC_BASE_URL: 'http://old' },
+      { ANTHROPIC_BASE_URL: 'http://new' },
+    );
     expect(env.PATH).toBe('/bin');
     expect(env.ANTHROPIC_BASE_URL).toBe('http://new');
   });
@@ -106,7 +128,11 @@ describe('isValidEnvKey', () => {
 
 describe('parseClaudeAuthOutput', () => {
   it('reads the JSON whatever the exit code was — signed out prints loggedIn:false and exits 1', () => {
-    expect(parseClaudeAuthOutput('{\n  "loggedIn": false,\n  "authMethod": "none",\n  "apiProvider": "firstParty"\n}\n')).toEqual({
+    expect(
+      parseClaudeAuthOutput(
+        '{\n  "loggedIn": false,\n  "authMethod": "none",\n  "apiProvider": "firstParty"\n}\n',
+      ),
+    ).toEqual({
       loggedIn: false,
       authMethod: 'none',
       apiProvider: 'firstParty',
@@ -114,7 +140,9 @@ describe('parseClaudeAuthOutput', () => {
   });
 
   it('tolerates chatter before the JSON, and gives null for anything that is not an answer', () => {
-    expect(parseClaudeAuthOutput('Checking…\n{"loggedIn":true,"authMethod":"claude.ai"}')?.loggedIn).toBe(true);
+    expect(
+      parseClaudeAuthOutput('Checking…\n{"loggedIn":true,"authMethod":"claude.ai"}')?.loggedIn,
+    ).toBe(true);
     expect(parseClaudeAuthOutput('')).toBeNull();
     expect(parseClaudeAuthOutput('command not found')).toBeNull();
     expect(parseClaudeAuthOutput('{"nope": 1}')).toBeNull();

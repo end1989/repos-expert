@@ -23,7 +23,10 @@ function traceMcpStartup(): string {
   fs.writeFileSync(trace, '');
   const configPath = path.join(tmp, 'expert.config.json');
   fs.mkdirSync(path.join(tmp, 'repos'), { recursive: true });
-  fs.writeFileSync(configPath, JSON.stringify({ reposDir: './repos', knowledgeDir: './knowledge' }));
+  fs.writeFileSync(
+    configPath,
+    JSON.stringify({ reposDir: './repos', knowledgeDir: './knowledge' }),
+  );
 
   const res = spawnSync(process.execPath, ['--import', PRELOAD, CLI, 'mcp'], {
     cwd: tmp,
@@ -47,7 +50,13 @@ describe('what `expert mcp` loads', () => {
   it('does not load the curator or the Claude Agent SDK', () => {
     const offenders = loaded
       .split('\n')
-      .filter((l) => l.includes('claude-agent-sdk') || l.includes('/dist/curator/') || l.includes('/dist/cli/curate-many.js') || l.includes('/dist/cli/refresh.js'));
+      .filter(
+        (l) =>
+          l.includes('claude-agent-sdk') ||
+          l.includes('/dist/curator/') ||
+          l.includes('/dist/cli/curate-many.js') ||
+          l.includes('/dist/cli/refresh.js'),
+      );
     expect(offenders, `expert mcp loaded:\n${offenders.join('\n')}`).toEqual([]);
   });
 });

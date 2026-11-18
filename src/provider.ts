@@ -1,3 +1,5 @@
+import { z } from 'zod';
+
 /**
  * Which model actually writes the documents.
  *
@@ -8,12 +10,7 @@
  * place that answers "what is about to be billed, and to whom".
  */
 export type ProviderKind =
-  | 'subscription'
-  | 'api-key'
-  | 'custom-endpoint'
-  | 'bedrock'
-  | 'vertex'
-  | 'none';
+  'subscription' | 'api-key' | 'custom-endpoint' | 'bedrock' | 'vertex' | 'none';
 
 export interface Provider {
   kind: ProviderKind;
@@ -40,16 +37,24 @@ export interface ClaudeAuth {
  * signed out — so the caller must hand over stdout regardless of the exit code, and this
  * returns null only when there is no usable answer in it.
  */
+const AuthStatus = z.looseObject({
+  loggedIn: z.boolean(),
+  authMethod: z.string().optional(),
+  subscriptionType: z.string().optional(),
+  apiProvider: z.string().optional(),
+});
+
 export function parseClaudeAuthOutput(stdout: string): ClaudeAuth | null {
   const start = stdout.indexOf('{');
   if (start < 0) return null;
+  let raw: unknown;
   try {
-    const parsed = JSON.parse(stdout.slice(start)) as Record<string, unknown>;
-    if (typeof parsed.loggedIn !== 'boolean') return null;
-    return parsed as unknown as ClaudeAuth;
+    raw = JSON.parse(stdout.slice(start));
   } catch {
     return null;
   }
+  const parsed = AuthStatus.safeParse(raw);
+  return parsed.success ? parsed.data : null;
 }
 
 export type EnvLike = Record<string, string | undefined>;
@@ -85,7 +90,10 @@ export function describeProvider(
   }
   if (isSet(env.ANTHROPIC_API_KEY)) {
     // Deliberately does not include the key.
-    return { kind: 'api-key', detail: 'ANTHROPIC_API_KEY — billed per token, not from a subscription' };
+    return {
+      kind: 'api-key',
+      detail: 'ANTHROPIC_API_KEY — billed per token, not from a subscription',
+    };
   }
   if (opts.hasClaudeCode) {
     const auth = opts.claudeAuth ?? null;
@@ -110,7 +118,8 @@ export function describeProvider(
     // in, and claiming "signed in" would be the false confidence this module exists to stop.
     return {
       kind: 'subscription',
-      detail: 'Claude Code on PATH — if it is signed in, curation draws on your Claude subscription',
+      detail:
+        'Claude Code on PATH — if it is signed in, curation draws on your Claude subscription',
     };
   }
   return { kind: 'none', detail: 'nothing configured — studying repos will fail' };
@@ -124,7 +133,10 @@ export function isValidEnvKey(key: string): boolean {
  * Config layered over the real environment. Config wins, because it is the thing
  * that survives into a scheduled task, where no shell variables are set.
  */
-export function curatorEnvFrom(base: EnvLike, fromConfig: Record<string, string> | undefined): EnvLike {
+export function curatorEnvFrom(
+  base: EnvLike,
+  fromConfig: Record<string, string> | undefined,
+): EnvLike {
   if (fromConfig === undefined || Object.keys(fromConfig).length === 0) return base;
   return { ...base, ...fromConfig };
 }

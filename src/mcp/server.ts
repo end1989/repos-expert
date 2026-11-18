@@ -1,31 +1,34 @@
 import fs from 'node:fs';
-import { createRequire } from 'node:module';
 import path from 'node:path';
 import { McpServer, ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import type { ExpertConfig } from '../config.js';
+import { isExcluded, type ExpertConfig } from '../config.js';
+import { resolveReal } from '../paths.js';
 import {
   getRepoStatus,
+  isValidRepoName,
   listRepoStatuses,
-  readMeta,
+  portfolioDrift,
   stalenessBanner,
   type RepoStatus,
 } from '../registry.js';
 import { searchText, listFiles } from '../rg.js';
-import { resolveWithin, readFileCapped } from './guards.js';
+import { VERSION } from '../version.js';
+import { namesGitDir, resolveWithin, readFileCapped } from './guards.js';
 
 export function text(t: string): { content: [{ type: 'text'; text: string }] } {
   return { content: [{ type: 'text', text: t }] };
 }
 
+/**
+ * The gate every per-repo tool goes through: a valid name, a repo that is really there,
+ * and one the config has not excluded — an excluded repo is absent, not hidden.
+ */
 export async function requireRepo(cfg: ExpertConfig, name: string): Promise<RepoStatus> {
-  if (!/^[A-Za-z0-9._-]+$/.test(name) || name === '.' || name === '..') {
-    throw new Error(`Unknown repo "${name}" — call list_repos to see what exists.`);
-  }
-  if (!fs.existsSync(path.join(cfg.reposDir, name, '.git'))) {
-    throw new Error(`Unknown repo "${name}" — call list_repos to see what exists.`);
-  }
+  const unknown = new Error(`Unknown repo "${name}" — call list_repos to see what exists.`);
+  if (!isValidRepoName(name) || isExcluded(cfg, name)) throw unknown;
+  if (!fs.existsSync(path.join(cfg.reposDir, name, '.git'))) throw unknown;
   return getRepoStatus(cfg, name);
 }
 
@@ -35,26 +38,13 @@ function knowledgeFile(cfg: ExpertConfig, ...segments: string[]): string | null 
 }
 
 function portfolioStalenessBanner(cfg: ExpertConfig, statuses: RepoStatus[]): string {
-  let recorded: Record<string, string> | undefined;
-  try {
-    const raw = fs.readFileSync(path.join(cfg.knowledgeDir, 'portfolio-meta.json'), 'utf8');
-    recorded = (JSON.parse(raw) as { repos?: Record<string, string> }).repos;
-  } catch {
-    return '';
-  }
-  if (recorded === undefined) return '';
-  const changed: string[] = [];
-  for (const s of statuses) {
-    if (s.curatedSha === null) continue;
-    const currentSha = readMeta(cfg.knowledgeDir, s.name)?.sha;
-    const recordedSha = recorded[s.name];
-    if (recordedSha === undefined || recordedSha !== currentSha) {
-      changed.push(s.name);
-    }
-  }
-  if (changed.length === 0) return '';
-  return `⚠ portfolio docs are out of date (re-curated since: ${changed.join(', ')}) — run \`expert curate --portfolio\`.\n\n`;
+  const changed = portfolioDrift(cfg.knowledgeDir, statuses);
+  if (changed === null || changed.length === 0) return '';
+  return `⚠ portfolio docs are out of date (changed since: ${changed.join(', ')}) — run \`expert curate --portfolio\`.\n\n`;
 }
+
+const NO_DOCS_YET =
+  'No written docs yet — run `expert refresh <repo>` to study a repository. search_code, find_files and read_repo_file read the source directly in the meantime.';
 
 /**
  * Every tool degrades to "here is what I can still do" rather than an error:
@@ -96,11 +86,6 @@ function cardSummary(cfg: ExpertConfig, name: string): string {
   return (line ?? '(empty card)').slice(0, 120);
 }
 
-// Read the real version rather than a literal that silently drifts from package.json.
-const { version: SERVER_VERSION } = createRequire(import.meta.url)('../../package.json') as {
-  version: string;
-};
-
 /**
  * Sent to the client once at connect. The knowledge docs are a model's written
  * summary, not ground truth, and the client is holding tools that can check them —
@@ -121,9 +106,9 @@ Two kinds of information, and they are not equally authoritative:
 
 Use the documents to orient and to answer conceptual and cross-repo questions. Then:
 
-- The repositories are open to you. If something in a document looks wrong, contradicts
-  itself, or does not match what the user is describing, go read the code and settle it.
-  You do not need permission, and you do not need to ask first.
+- The repositories are open to you through the read tools, which have no side effects and
+  always show the current code. If something in a document looks wrong, contradicts
+  itself, or does not match what the user is describing, the code is where to settle it.
 - Verify what matters, not everything. Re-checking every sentence wastes the point of
   having summaries. Do check before stating something the user will act on: an exact
   endpoint, a function signature, a file path, whether a feature actually exists.
@@ -167,14 +152,15 @@ export function setupInstructions(reason: string): string {
  */
 export function createUnconfiguredServer(reason: string): McpServer {
   const server = new McpServer(
-    { name: 'repos-expert', version: SERVER_VERSION },
+    { name: 'repos-expert', version: VERSION },
     { instructions: setupInstructions(reason) },
   );
   const message = setupInstructions(reason);
-  for (const name of TOOL_NAMES) {
+  for (const [name, title] of Object.entries(TOOL_TITLES)) {
     server.registerTool(
       name,
       {
+        title,
         description: 'Unavailable until repos-expert is set up — call it to see how.',
         inputSchema: {},
         annotations: READ_ONLY,
@@ -224,20 +210,24 @@ function one(value: string | string[] | undefined): string {
  * one card per repo — and the other docs are one template away, with completion.
  */
 function registerResources(server: McpServer, cfg: ExpertConfig): void {
-  const markdown = (uri: URL, text: string) => ({ contents: [{ uri: uri.href, mimeType: MARKDOWN, text }] });
+  const markdown = (uri: URL, body: string) => ({
+    contents: [{ uri: uri.href, mimeType: MARKDOWN, text: body }],
+  });
 
   server.registerResource(
     'portfolio',
     'expert://portfolio',
     {
       title: 'Portfolio overview',
-      description: 'What repos exist, grouped by theme, and how they relate. Read first for cross-repo questions.',
+      description:
+        'What repos exist, grouped by theme, and how they relate. Read first for cross-repo questions.',
       mimeType: MARKDOWN,
     },
     async (uri) => {
       const statuses = await listRepoStatuses(cfg);
       const body =
-        knowledgeFile(cfg, 'portfolio.md') ?? '(portfolio.md not yet curated — run `expert curate --portfolio`)';
+        knowledgeFile(cfg, 'portfolio.md') ??
+        '(portfolio.md not yet curated — run `expert curate --portfolio`)';
       return markdown(uri, portfolioStalenessBanner(cfg, statuses) + body);
     },
   );
@@ -247,13 +237,15 @@ function registerResources(server: McpServer, cfg: ExpertConfig): void {
     'expert://cross-repo-map',
     {
       title: 'Cross-repo map',
-      description: 'Which repos are actually wired together (imports, ports, shared files) versus merely similar.',
+      description:
+        'Which repos are actually wired together (imports, ports, shared files) versus merely similar.',
       mimeType: MARKDOWN,
     },
     async (uri) =>
       markdown(
         uri,
-        knowledgeFile(cfg, 'cross-repo-map.md') ?? '(cross-repo-map.md not yet curated — run `expert curate --portfolio`)',
+        knowledgeFile(cfg, 'cross-repo-map.md') ??
+          '(cross-repo-map.md not yet curated — run `expert curate --portfolio`)',
       ),
   );
 
@@ -305,28 +297,66 @@ const READ_ONLY = {
   openWorldHint: false,
 } as const;
 
-/** Every tool this server exposes; the unconfigured server mirrors the list. */
-const TOOL_NAMES = [
-  'portfolio_overview',
-  'list_repos',
-  'get_repo_knowledge',
-  'search_knowledge',
-  'search_code',
-  'find_files',
-  'read_repo_file',
-] as const;
+/** Every tool this server exposes, with its display title; the unconfigured server mirrors the list. */
+const TOOL_TITLES = {
+  portfolio_overview: 'Portfolio overview',
+  list_repos: 'List repositories',
+  get_repo_knowledge: 'Read a repository’s written docs',
+  search_knowledge: 'Search the written docs',
+  search_code: 'Search source code',
+  find_files: 'Find files by name',
+  read_repo_file: 'Read a source file',
+} as const;
+
+/** Parameter descriptions are the only documentation a model gets for each argument. */
+/** Longer than any real query, glob or path; past this an argument is a mistake, or an attack. */
+const MAX_QUERY_LENGTH = 4096;
+const MAX_GLOB_LENGTH = 256;
+const MAX_PATH_LENGTH = 4096;
+
+const PARAM = {
+  repo: z.string().describe('Repository name, exactly as list_repos prints it.'),
+  repoFilter: z
+    .string()
+    .optional()
+    .describe(
+      'Limit to this one repository (a name from list_repos). Omit to cover every repository.',
+    ),
+  query: z
+    .string()
+    .min(1)
+    .max(MAX_QUERY_LENGTH)
+    .describe(
+      'What to look for, as a ripgrep regular expression; case-insensitive unless it contains a capital letter. Escape ( [ { . * + ? | or set literal to search for code as written.',
+    ),
+  glob: (example: string) =>
+    z
+      .string()
+      .min(1)
+      .max(MAX_GLOB_LENGTH)
+      .describe(
+        `Glob matched against paths inside each repository, e.g. ${example}. {a,b} and [abc] work; start it with ! to exclude instead. A glob only narrows: hidden files (dotfiles, .github) and gitignored files are never searched or listed — open those with read_repo_file.`,
+      ),
+  literal: z
+    .boolean()
+    .optional()
+    .describe(
+      'Search for the query exactly as written instead of as a regular expression. Default false.',
+    ),
+};
 
 export function createServer(cfg: ExpertConfig): McpServer {
   const server = new McpServer(
-    { name: 'repos-expert', version: SERVER_VERSION },
+    { name: 'repos-expert', version: VERSION },
     { instructions: SERVER_INSTRUCTIONS },
   );
 
   server.registerTool(
     'portfolio_overview',
     {
+      title: TOOL_TITLES.portfolio_overview,
       description:
-        'The whole portfolio: what repos exist, how they fit together, and which docs are stale.',
+        'Start here for questions that span repositories: the written overview of every repo, how they connect, and which docs are out of date.',
       inputSchema: {},
       annotations: READ_ONLY,
     },
@@ -358,26 +388,64 @@ export function createServer(cfg: ExpertConfig): McpServer {
   server.registerTool(
     'list_repos',
     {
-      description: 'List every repo available, with a one-line summary and whether its docs are current.',
+      title: TOOL_TITLES.list_repos,
+      description:
+        'Every repository in the collection, with a one-line summary and whether its written docs are current (fresh), older than the code (stale) or not written yet (uncurated). These names are what the other tools take as "repo".',
       inputSchema: {},
+      // Staleness as data, not just prose: a client can act on `state` without parsing text.
+      outputSchema: {
+        repos: z
+          .array(
+            z.object({
+              name: z.string(),
+              state: z.enum(['fresh', 'stale', 'uncurated']),
+              currentSha: z.string().describe('The commit the repository is at now.'),
+              curatedSha: z.string().nullable().describe('The commit the docs were written at.'),
+              verifiedThrough: z
+                .string()
+                .nullable()
+                .describe(
+                  'Set when only docs or CI changed since: code confirmed unchanged through this commit.',
+                ),
+              summary: z.string().describe('The first line of the repo’s card.'),
+            }),
+          )
+          .describe('Every repository, sorted by name.'),
+      },
       annotations: READ_ONLY,
     },
     async () => {
       const statuses = await listRepoStatuses(cfg);
-      if (statuses.length === 0) return text(noReposHint(cfg));
-      const lines = statuses.map((s) => `${s.name} [${s.state}] — ${cardSummary(cfg, s.name)}`);
-      return text(lines.join('\n'));
+      const repos = statuses.map((s) => ({
+        name: s.name,
+        state: s.state,
+        currentSha: s.currentSha,
+        curatedSha: s.curatedSha,
+        verifiedThrough: s.verifiedThrough,
+        summary: cardSummary(cfg, s.name),
+      }));
+      const body =
+        repos.length === 0
+          ? noReposHint(cfg)
+          : repos.map((r) => `${r.name} [${r.state}] — ${r.summary}`).join('\n');
+      return { content: [{ type: 'text' as const, text: body }], structuredContent: { repos } };
     },
   );
 
   server.registerTool(
     'get_repo_knowledge',
     {
+      title: TOOL_TITLES.get_repo_knowledge,
       description:
-        'Curated knowledge docs for one repo. "interfaces" is the verified contract surface — routes, CLI commands, exports, env vars, data models, outbound calls — and is usually the fastest answer to "what does this expose?".',
+        'One written document about one repository. "interfaces" is the verified contract surface — routes, CLI commands, exports, env vars, data models, outbound calls, each citing file:line — and is usually the fastest answer to "what does this expose?".',
       inputSchema: {
-        repo: z.string(),
-        doc: z.enum(REPO_DOCS).optional(),
+        repo: PARAM.repo,
+        doc: z
+          .enum(REPO_DOCS)
+          .optional()
+          .describe(
+            'Which document: card (what it is and how to run it; the default), architecture (modules and design), map (annotated directory tree), activity (recent work and open branches), or interfaces (contract surface).',
+          ),
       },
       annotations: READ_ONLY,
     },
@@ -387,57 +455,134 @@ export function createServer(cfg: ExpertConfig): McpServer {
   server.registerTool(
     'search_knowledge',
     {
-      description: 'Full-text search across all curated knowledge docs.',
-      inputSchema: { query: z.string() },
+      title: TOOL_TITLES.search_knowledge,
+      description:
+        'Search the written docs of every repository, for concepts and relationships the code alone does not state. Results are file:line:text, at most 100. To find code, use search_code.',
+      inputSchema: { query: PARAM.query, literal: PARAM.literal },
       annotations: READ_ONLY,
     },
-    async ({ query }) => text(await searchText(cfg.knowledgeDir, query)),
+    async ({ query, literal }, extra) => {
+      if (!fs.existsSync(cfg.knowledgeDir)) return text(NO_DOCS_YET);
+      // The docs of an excluded repo are as absent as the repo itself.
+      return text(
+        await searchText(cfg.knowledgeDir, query, {
+          literal,
+          excludeFolders: cfg.excludeRepos.map((name) => `repos/${name}`),
+          signal: extra.signal,
+        }),
+      );
+    },
   );
 
   server.registerTool(
     'search_code',
     {
+      title: TOOL_TITLES.search_code,
       description:
-        'Search the real source code of the repos, right now. Searches all repos unless "repo" is given. "glob" filters file names (e.g. *.ts).',
-      inputSchema: { query: z.string(), repo: z.string().optional(), glob: z.string().optional() },
+        'Search the current source code of every repository, or of one. Results are repo/path:line:text sorted by path, at most 100; when capped, a missing match proves nothing, so narrow with repo or glob.',
+      inputSchema: {
+        query: PARAM.query,
+        repo: PARAM.repoFilter,
+        glob: PARAM.glob('"*.ts" or "src/**/*.py"').optional(),
+        literal: PARAM.literal,
+      },
       annotations: READ_ONLY,
     },
-    async ({ query, repo, glob }) => {
-      if (repo === undefined) return text(await searchText(cfg.reposDir, query, glob));
+    async ({ query, repo, glob, literal }, extra) => {
+      if (repo === undefined) {
+        if (!fs.existsSync(cfg.reposDir)) return text(noReposHint(cfg));
+        return text(
+          await searchText(cfg.reposDir, query, {
+            glob,
+            literal,
+            excludeFolders: cfg.excludeRepos,
+            globBelowTopLevel: true,
+            signal: extra.signal,
+          }),
+        );
+      }
       const status = await requireRepo(cfg, repo);
-      return text(stalenessBanner(status) + (await searchText(status.path, query, glob)));
+      return text(
+        stalenessBanner(status) +
+          (await searchText(status.path, query, { glob, literal, signal: extra.signal })),
+      );
     },
   );
 
   server.registerTool(
     'find_files',
     {
-      description: 'List files matching a glob pattern, in one repo or across all of them.',
-      inputSchema: { pattern: z.string(), repo: z.string().optional() },
+      title: TOOL_TITLES.find_files,
+      description:
+        'List files whose path matches a glob, in one repository or across all of them. At most 100, sorted by path.',
+      inputSchema: {
+        pattern: PARAM.glob('"*.ts", "**/Dockerfile" or "src/**/*.test.ts"'),
+        repo: PARAM.repoFilter,
+      },
       annotations: READ_ONLY,
     },
-    async ({ pattern, repo }) => {
-      const root = repo === undefined ? cfg.reposDir : (await requireRepo(cfg, repo)).path;
-      return text(await listFiles(root, pattern));
+    async ({ pattern, repo }, extra) => {
+      if (repo === undefined) {
+        if (!fs.existsSync(cfg.reposDir)) return text(noReposHint(cfg));
+        return text(
+          await listFiles(cfg.reposDir, pattern, {
+            excludeFolders: cfg.excludeRepos,
+            globBelowTopLevel: true,
+            signal: extra.signal,
+          }),
+        );
+      }
+      return text(
+        await listFiles((await requireRepo(cfg, repo)).path, pattern, { signal: extra.signal }),
+      );
     },
   );
 
   server.registerTool(
     'read_repo_file',
     {
+      title: TOOL_TITLES.read_repo_file,
       description:
-        'Read one file from a repo (max 2,000 lines / 200 KB). Lines are 1-based inclusive.',
+        'Read one file from a repository. Long files come back in parts — at most 2,000 lines or 48 KB per call — ending with the startLine to continue from.',
       inputSchema: {
-        repo: z.string(),
-        path: z.string(),
-        startLine: z.number().int().min(1).optional(),
-        endLine: z.number().int().min(1).optional(),
+        repo: PARAM.repo,
+        path: z
+          .string()
+          .min(1)
+          .max(MAX_PATH_LENGTH)
+          .describe('Path inside the repository, relative to its root, e.g. "src/index.ts".'),
+        startLine: z
+          .number()
+          .int()
+          .min(1)
+          .optional()
+          .describe('First line to return, 1-based. Default 1.'),
+        endLine: z
+          .number()
+          .int()
+          .min(1)
+          .optional()
+          .describe(
+            'Last line to return, inclusive. Default: the end of the file, within the read cap.',
+          ),
       },
       annotations: READ_ONLY,
     },
     async ({ repo, path: relPath, startLine, endLine }) => {
       const status = await requireRepo(cfg, repo);
-      const abs = resolveWithin(status.path, relPath);
+      const notServed = new Error(
+        `Not served: ${relPath} is inside .git — git's own data, not source, and a remote URL there can carry a token.`,
+      );
+      const abs = resolveWithin(status.path, relPath); // throws if it leaves the repo
+      const root = path.resolve(status.path);
+      // Judged as written and where it lands: a link, or a Windows short name, can reach
+      // .git too. Both are repo-relative, so a drive letter's colon never reads as a stream.
+      if (
+        namesGitDir(path.relative(root, path.resolve(root, relPath))) ||
+        namesGitDir(path.relative(resolveReal(root), abs))
+      ) {
+        throw notServed;
+      }
       if (!fs.existsSync(abs)) {
         throw new Error(`File not found in "${repo}": ${relPath}`);
       }

@@ -1,24 +1,13 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { ExpertConfig } from '../src/config.js';
 import type { RemoteRepo } from '../src/git.js';
 import { syncRepos, type SyncDeps } from '../src/cli/sync.js';
-import { makeTempDir, initGitRepo, commitFile } from './helpers.js';
+import { makeTempDir, initGitRepo, commitFile, testConfig } from './helpers.js';
 
 function makeCfg(root: string, extra: Partial<ExpertConfig> = {}): ExpertConfig {
-  return {
-    githubUser: 'u',
-    reposDir: path.join(root, 'repos'),
-    reposListFile: path.join(root, 'repos', 'repos.txt'),
-    knowledgeDir: path.join(root, 'knowledge'),
-    model: 'claude-sonnet-5',
-    excludeRepos: [],
-    includeArchived: false,
-    curateConcurrency: 4,
-    curateTimeoutMinutes: 25,
-    ...extra,
-  };
+  return testConfig(root, { githubUser: 'u', curateConcurrency: 4, ...extra });
 }
 
 function writeList(cfg: ExpertConfig, body: string): void {
@@ -44,11 +33,164 @@ const noDeps = (over: Partial<SyncDeps> = {}): SyncDeps => ({
 });
 
 describe('syncRepos with nothing configured', () => {
-  it('names the list file to add URLs to, and says the folder still works', async () => {
+  it('is not a failure — copying folders in is a supported way to work — and says what sync is for', async () => {
     const cfg = { ...makeCfg(makeTempDir('expert-sync-')), githubUser: null };
-    await expect(syncRepos(cfg, noDeps())).rejects.toThrow(
+    const res = await syncRepos(cfg, noDeps());
+    expect(res.failed).toEqual([]);
+    expect(res.synced).toEqual([]);
+    expect(res.nothingToSync).toMatch(
       new RegExp(`${path.basename(cfg.reposListFile)}[\\s\\S]*still works`),
     );
+  });
+});
+
+describe('syncRepos when things go wrong', () => {
+  it('removes a clone that failed partway, so the next run does not count it as synced', async () => {
+    const cfg = { ...makeCfg(makeTempDir('expert-sync-')), githubUser: null };
+    writeList(cfg, 'https://github.com/acme/broken.git');
+    const dest = path.join(cfg.reposDir, 'broken');
+    const res = await syncRepos(
+      cfg,
+      noDeps({
+        clone: async (_url, to) => {
+          fs.mkdirSync(path.join(to, '.git'), { recursive: true }); // git got this far...
+          throw new Error('fatal: early EOF'); // ...and then the network went away
+        },
+      }),
+    );
+    expect(res.failed.map((f) => f.name)).toEqual(['broken']);
+    expect(fs.existsSync(dest)).toBe(false);
+  });
+
+  it('never removes a clone that another sync made while this one was failing', async () => {
+    // Two syncs both find the repo missing. One clone wins; the other fails because the
+    // folder is there now. The run that failed did not make that folder and must not delete it.
+    const cfg = { ...makeCfg(makeTempDir('expert-sync-')), githubUser: null };
+    writeList(cfg, 'https://github.com/acme/shared.git');
+    const dest = path.join(cfg.reposDir, 'shared');
+    let bothLooked!: () => void;
+    const looked = new Promise<void>((resolve) => (bothLooked = resolve));
+    let winnerDone!: () => void;
+    const won = new Promise<void>((resolve) => (winnerDone = resolve));
+    const winner = syncRepos(
+      cfg,
+      noDeps({
+        clone: async (_url, to) => {
+          await looked;
+          fs.mkdirSync(path.join(to, '.git'), { recursive: true });
+          fs.writeFileSync(path.join(to, 'README.md'), 'cloned by the winner');
+          winnerDone();
+        },
+      }),
+    );
+    const loser = syncRepos(
+      cfg,
+      noDeps({
+        clone: async (_url, to) => {
+          await won;
+          throw new Error(`fatal: destination path '${to}' already exists`);
+        },
+      }),
+    );
+    bothLooked();
+    const [first, second] = await Promise.all([winner, loser]);
+    expect(first.synced).toEqual(['shared']);
+    expect(second.failed.map((f) => f.name)).toEqual(['shared']);
+    expect(fs.readFileSync(path.join(dest, 'README.md'), 'utf8')).toBe('cloned by the winner');
+  });
+
+  it('never clones into a folder it did not create, so it can never remove another run’s clone', async () => {
+    // Another sync has just claimed the name and not yet written .git. Cloning into its
+    // folder would let whichever clone fails delete the one that succeeded.
+    const cfg = { ...makeCfg(makeTempDir('expert-sync-')), githubUser: null };
+    writeList(cfg, 'https://github.com/acme/busy.git');
+    const dest = path.join(cfg.reposDir, 'busy');
+    fs.mkdirSync(dest, { recursive: true });
+    const cloned: string[] = [];
+    const res = await syncRepos(
+      cfg,
+      noDeps({
+        clone: async (_url, to) => {
+          cloned.push(to);
+        },
+      }),
+    );
+    expect(cloned).toEqual([]);
+    expect(res.failed).toEqual([
+      { name: 'busy', error: expect.stringMatching(/already exists[\s\S]*not a git repository/) },
+    ]);
+    expect(fs.existsSync(dest)).toBe(true);
+  });
+
+  it('reports a partial clone it could not remove, and carries on with the next repo', async () => {
+    const cfg = { ...makeCfg(makeTempDir('expert-sync-')), githubUser: null };
+    writeList(
+      cfg,
+      ['https://github.com/acme/stuck.git', 'https://github.com/acme/fine.git'].join('\n'),
+    );
+    // A file another program still holds open can stop the removal on Windows.
+    const rm = vi.spyOn(fs, 'rmSync').mockImplementationOnce(() => {
+      throw Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' });
+    });
+    try {
+      const res = await syncRepos(
+        cfg,
+        noDeps({
+          clone: async (url, to) => {
+            fs.mkdirSync(path.join(to, '.git'), { recursive: true });
+            if (url.includes('stuck')) throw new Error('fatal: early EOF');
+          },
+        }),
+      );
+      expect(res.synced).toEqual(['fine']);
+      expect(res.failed).toEqual([
+        {
+          name: 'stuck',
+          error: expect.stringMatching(/early EOF[\s\S]*could not be removed[\s\S]*EBUSY/),
+        },
+      ]);
+    } finally {
+      rm.mockRestore();
+    }
+  });
+
+  it('never removes a folder that was already there when the update failed', async () => {
+    const cfg = { ...makeCfg(makeTempDir('expert-sync-')), githubUser: null };
+    writeList(cfg, 'https://github.com/acme/mine.git');
+    const dest = path.join(cfg.reposDir, 'mine');
+    fs.mkdirSync(path.join(dest, '.git'), { recursive: true });
+    const res = await syncRepos(
+      cfg,
+      noDeps({
+        pull: async () => {
+          throw new Error('diverged');
+        },
+      }),
+    );
+    expect(res.failed.map((f) => f.name)).toEqual(['mine']);
+    expect(fs.existsSync(path.join(dest, '.git'))).toBe(true);
+  });
+
+  it('reports a GitHub listing that failed, and still clones what the list names', async () => {
+    const cfg = makeCfg(makeTempDir('expert-sync-'), { githubUser: 'someone' });
+    writeList(cfg, 'https://github.com/acme/listed.git');
+    const cloned: string[] = [];
+    const res = await syncRepos(
+      cfg,
+      noDeps({
+        listRemote: async () => {
+          throw new Error('spawn gh ENOENT');
+        },
+        clone: async (_url, to) => {
+          cloned.push(path.basename(to));
+          fs.mkdirSync(path.join(to, '.git'), { recursive: true });
+        },
+      }),
+    );
+    expect(cloned).toEqual(['listed']);
+    expect(res.synced).toEqual(['listed']);
+    expect(res.failed).toHaveLength(1);
+    expect(res.failed[0]?.error).toMatch(/gh auth status/);
   });
 });
 
@@ -56,7 +198,12 @@ describe('syncRepos from the repos list', () => {
   it('clones listed projects with no GitHub account involved', async () => {
     const root = makeTempDir('expert-sync-');
     const cfg = { ...makeCfg(root), githubUser: null };
-    writeList(cfg, ['# mine', 'https://github.com/acme/one.git', 'two = git@github.com:acme/other.git'].join('\n'));
+    writeList(
+      cfg,
+      ['# mine', 'https://github.com/acme/one.git', 'two = git@github.com:acme/other.git'].join(
+        '\n',
+      ),
+    );
 
     const cloned: string[] = [];
     const res = await syncRepos(
@@ -112,7 +259,9 @@ describe('syncRepos from the repos list', () => {
       }),
     );
     expect(res.synced).toEqual(['fine']);
-    expect(res.failed).toEqual([{ name: cfg.reposListFile, error: expect.stringMatching(/line 1/) }]);
+    expect(res.failed).toEqual([
+      { name: cfg.reposListFile, error: expect.stringMatching(/line 1/) },
+    ]);
   });
 
   it('lets the list win over a GitHub repo of the same name', async () => {
@@ -140,7 +289,10 @@ describe('syncRepos from the repos list', () => {
   it('still honors excludeRepos for listed projects', async () => {
     const root = makeTempDir('expert-sync-');
     const cfg = { ...makeCfg(root), githubUser: null, excludeRepos: ['nope'] };
-    writeList(cfg, ['https://github.com/acme/nope.git', 'https://github.com/acme/yes.git'].join('\n'));
+    writeList(
+      cfg,
+      ['https://github.com/acme/nope.git', 'https://github.com/acme/yes.git'].join('\n'),
+    );
     const res = await syncRepos(
       cfg,
       noDeps({
@@ -164,7 +316,12 @@ describe('syncRepos', () => {
 
     const calls: string[] = [];
     const deps: SyncDeps = {
-      listRemote: async () => [remote('new-one'), remote('have-it'), remote('skip-me'), remote('old', true)],
+      listRemote: async () => [
+        remote('new-one'),
+        remote('have-it'),
+        remote('skip-me'),
+        remote('old', true),
+      ],
       clone: async (_url, dest) => {
         calls.push(`clone:${path.basename(dest)}`);
         fs.mkdirSync(path.join(dest, '.git'), { recursive: true });
@@ -216,7 +373,10 @@ describe('syncRepos', () => {
     expect(calls).toEqual(['clone:alpha']);
     expect(res.synced).toEqual(['alpha']);
     expect(res.failed).toEqual([
-      { name: 'ghost', error: expect.stringMatching(/not found in the repos list[\s\S]*GitHub account/) },
+      {
+        name: 'ghost',
+        error: expect.stringMatching(/not found in the repos list[\s\S]*GitHub account/),
+      },
     ]);
   });
 

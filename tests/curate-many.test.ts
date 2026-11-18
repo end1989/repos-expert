@@ -1,22 +1,12 @@
-import { describe, it, expect } from 'vitest';
-import path from 'node:path';
+import { describe, it, expect, vi } from 'vitest';
 import type { ExpertConfig } from '../src/config.js';
-import type { RepoStatus } from '../src/registry.js';
-import { curateMany, parseConcurrency } from '../src/cli/curate-many.js';
-import { makeTempDir } from './helpers.js';
+import type { RepoStatus, RunStats } from '../src/registry.js';
+import { curateMany, describeRun, parseConcurrency } from '../src/cli/curate-many.js';
+import { CuratorError } from '../src/curator/errors.js';
+import { makeTempDir, testConfig } from './helpers.js';
 
 function makeCfg(root: string, curateConcurrency = 4): ExpertConfig {
-  return {
-    githubUser: 'u',
-    reposDir: path.join(root, 'repos'),
-    reposListFile: path.join(root, 'repos', 'repos.txt'),
-    knowledgeDir: path.join(root, 'knowledge'),
-    model: 'claude-sonnet-5',
-    excludeRepos: [],
-    includeArchived: false,
-    curateConcurrency,
-    curateTimeoutMinutes: 25,
-  };
+  return testConfig(root, { curateConcurrency });
 }
 
 const status = (name: string): RepoStatus => ({
@@ -25,6 +15,7 @@ const status = (name: string): RepoStatus => ({
   currentSha: 'a'.repeat(40),
   curatedSha: null,
   curatedAt: null,
+  verifiedThrough: null,
   state: 'uncurated',
 });
 
@@ -133,6 +124,132 @@ describe('curateMany', () => {
   it('handles an empty target list', async () => {
     const cfg = makeCfg(makeTempDir('expert-cm-'));
     expect(await curateMany(cfg, [], async () => {})).toEqual([]);
+  });
+
+  it('says what each measured run cost, and what the batch cost in total', async () => {
+    const cfg = makeCfg(makeTempDir('expert-cm-'));
+    const lines: string[] = [];
+    const spy = vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+      lines.push(args.join(' '));
+    });
+    try {
+      await curateMany(
+        cfg,
+        [status('a'), status('b')],
+        async (_cfg, s) => ({
+          stats: { ...STATS, costUsd: s.name === 'a' ? 0.5 : 0.25 },
+          citations: { checked: 4, broken: [] },
+        }),
+        1,
+      );
+    } finally {
+      spy.mockRestore();
+    }
+    expect(lines).toContain('curated a (1/2) — $0.50, 2.9 min, 41 turns');
+    expect(lines).toContain('curated b (2/2) — $0.25, 2.9 min, 41 turns');
+    expect(lines.at(-1)).toBe(
+      'Spent about $0.75 across 2 repos (the agent runtime’s estimate, not a bill).',
+    );
+  });
+
+  it('counts what a failed repo spent, and says so beside the failure', async () => {
+    const cfg = makeCfg(makeTempDir('expert-cm-'));
+    const lines: string[] = [];
+    const errors: string[] = [];
+    const log = vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+      lines.push(args.join(' '));
+    });
+    const err = vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+      errors.push(args.join(' '));
+    });
+    try {
+      await curateMany(
+        cfg,
+        [status('a'), status('b')],
+        async (_cfg, s) => {
+          if (s.name === 'b') {
+            throw new CuratorError('budget', 'Stopped at the spending cap for one repository.', {
+              stats: { ...STATS, costUsd: 0.25 },
+            });
+          }
+          return { stats: { ...STATS, costUsd: 0.5 }, citations: { checked: 4, broken: [] } };
+        },
+        1,
+      );
+    } finally {
+      log.mockRestore();
+      err.mockRestore();
+    }
+    expect(errors).toEqual([
+      'FAILED b: Stopped at the spending cap for one repository. (2/2) — $0.25, 2.9 min, 41 turns',
+    ]);
+    expect(lines.at(-1)).toBe(
+      'Spent about $0.75 across 2 repos (the agent runtime’s estimate, not a bill).',
+    );
+  });
+
+  it('flags a repo whose docs cite lines that do not exist', async () => {
+    const cfg = makeCfg(makeTempDir('expert-cm-'));
+    const lines: string[] = [];
+    const spy = vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+      lines.push(args.join(' '));
+    });
+    try {
+      await curateMany(
+        cfg,
+        [status('a')],
+        async () => ({
+          stats: STATS,
+          citations: {
+            checked: 3,
+            broken: [{ doc: 'map.md', citation: 'x/y.ts:9', reason: 'no such file' }],
+          },
+        }),
+        1,
+      );
+    } finally {
+      spy.mockRestore();
+    }
+    expect(lines[0]).toBe(
+      'curated a (1/1) — $0.84, 2.9 min, 41 turns; 1 of 3 citations do not resolve (see meta.json)',
+    );
+  });
+
+  it('prints no cost line when nothing was measured', async () => {
+    const cfg = makeCfg(makeTempDir('expert-cm-'));
+    const lines: string[] = [];
+    const spy = vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+      lines.push(args.join(' '));
+    });
+    try {
+      await curateMany(cfg, [status('a')], async () => undefined, 1);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(lines).toEqual(['curated a (1/1)']);
+  });
+});
+
+const STATS: RunStats = {
+  costUsd: 0.8412,
+  turns: 41,
+  durationMs: 174_000,
+  inputTokens: 500_000,
+  outputTokens: 9000,
+  sessionId: 's',
+  deniedToolCalls: 0,
+};
+
+describe('describeRun', () => {
+  it('gives cost, time and turns in a form that reads at a glance', () => {
+    expect(describeRun(STATS)).toBe('$0.84, 2.9 min, 41 turns');
+    expect(describeRun({ ...STATS, durationMs: 45_400, turns: 1 })).toBe('$0.84, 45 s, 1 turn');
+  });
+
+  it('calls out reads the agent was refused, which may mean the repo tried to steer it', () => {
+    expect(describeRun({ ...STATS, deniedToolCalls: 2 })).toBe(
+      '$0.84, 2.9 min, 41 turns, 2 reads outside the repo refused',
+    );
   });
 });
 

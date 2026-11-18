@@ -64,7 +64,11 @@ export function formatDryRun(names: string[], est: Estimate): string {
   const shown = names.slice(0, PREVIEW_NAMES);
   const hidden = names.length - shown.length;
   return [
-    formatEstimate(est, names.length, `${names.length} ${names.length === 1 ? 'repo' : 'repos'} would be studied.`),
+    formatEstimate(
+      est,
+      names.length,
+      `${names.length} ${names.length === 1 ? 'repo' : 'repos'} would be studied.`,
+    ),
     '',
     'Which ones:',
     ...shown.map((n) => `  ${n}`),

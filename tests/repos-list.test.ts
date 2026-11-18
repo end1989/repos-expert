@@ -29,9 +29,14 @@ describe('repoNameFromUrl', () => {
 describe('parseReposList', () => {
   it('reads one URL per line and ignores comments and blanks', () => {
     const { entries, problems } = parseReposList(
-      ['# my services', '', 'https://github.com/acme/one.git', '  ', 'git@github.com:acme/two.git', '# trailing note'].join(
-        '\n',
-      ),
+      [
+        '# my services',
+        '',
+        'https://github.com/acme/one.git',
+        '  ',
+        'git@github.com:acme/two.git',
+        '# trailing note',
+      ].join('\n'),
     );
     expect(problems).toEqual([]);
     expect(entries).toEqual([
@@ -42,7 +47,9 @@ describe('parseReposList', () => {
 
   it('accepts "name = url" to override the folder name', () => {
     const { entries } = parseReposList('billing = https://gitlab.com/acme/a-very-long-name.git');
-    expect(entries).toEqual([{ name: 'billing', url: 'https://gitlab.com/acme/a-very-long-name.git' }]);
+    expect(entries).toEqual([
+      { name: 'billing', url: 'https://gitlab.com/acme/a-very-long-name.git' },
+    ]);
   });
 
   it('expands the owner/repo shorthand people paste from GitHub', () => {
@@ -108,6 +115,16 @@ describe('readReposList', () => {
     const file = path.join(root, 'repos.txt');
     fs.writeFileSync(file, reposListTemplate());
     expect(readReposList(file).entries).toEqual([]);
+  });
+
+  it('reads the first project of a list saved with a byte-order mark, as Notepad writes it', () => {
+    const root = makeTempDir('expert-list-');
+    const file = path.join(root, 'repos.txt');
+    fs.writeFileSync(file, '\uFEFFhttps://github.com/acme/first.git\n');
+    expect(readReposList(file)).toEqual({
+      entries: [expect.objectContaining({ name: 'first' })],
+      problems: [],
+    });
   });
 });
 

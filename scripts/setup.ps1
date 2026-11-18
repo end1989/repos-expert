@@ -4,8 +4,9 @@
   Claude Desktop.
 
 .DESCRIPTION
-  Safe to re-run. Nothing is overwritten without a backup, and every step reports what
-  it did or why it skipped.
+  Safe to re-run. The config and the Claude Desktop entry are written by the tool's own
+  `init`, which never overwrites an existing config, keeps a backup of the Claude Desktop
+  config, and reports what it did or why it skipped.
 
 .EXAMPLE
   .\scripts\setup.ps1
@@ -14,6 +15,7 @@
 [CmdletBinding()]
 param(
   # Folder that holds your project folders. Defaults to the repos/ folder in this clone.
+  # A relative path is read from where you run the script.
   [string] $ReposDir,
   # Optional: only needed to pull repos down from GitHub.
   [string] $GithubUser,
@@ -24,6 +26,10 @@ param(
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 
+# Keep this file ASCII. Windows PowerShell 5.1 reads a script without a byte-order mark
+# as Windows-1252, where the last byte of a UTF-8 dash is a curly quote that ends a string.
+# Paths go through -LiteralPath: with -Path, a [ or ] in a folder name is a wildcard.
+
 function Step { param([string] $Message) Write-Host "`n== $Message" -ForegroundColor Cyan }
 function Ok   { param([string] $Message) Write-Host "   $Message" -ForegroundColor Green }
 function Note { param([string] $Message) Write-Host "   $Message" -ForegroundColor Yellow }
@@ -33,11 +39,21 @@ function Test-Cmd {
   $null -ne (Get-Command $Name -ErrorAction SilentlyContinue)
 }
 
+# A native command's exit code is not an error to PowerShell (5.1, or 7 without
+# $PSNativeCommandUseErrorActionPreference): check it, or a failed npm ci reads as success.
+function Invoke-Checked {
+  param([string] $What, [scriptblock] $Command)
+  & $Command
+  if ($LASTEXITCODE -ne 0) {
+    throw "$What failed (exit code $LASTEXITCODE). Fix the error above and re-run this script."
+  }
+}
+
 function Install-IfMissing {
   param([string] $Command, [string] $WingetId, [string] $Label, [switch] $Optional)
   if (Test-Cmd $Command) { Ok "$Label already installed"; return $true }
   if (-not (Test-Cmd 'winget')) {
-    Note "$Label is missing and winget is unavailable — install it manually."
+    Note "$Label is missing and winget is unavailable - install it manually."
     return $false
   }
   Note "installing $Label ..."
@@ -56,17 +72,17 @@ Step 'Checking prerequisites'
 $hasNode = Install-IfMissing -Command 'node' -WingetId 'OpenJS.NodeJS.LTS' -Label 'Node.js'
 if (-not $hasNode) { throw 'Node.js is required. Install it, reopen your terminal, and re-run this script.' }
 
-$nodeMajor = ((node --version) -replace '^v', '').Split('.')[0] -as [int]
-if ($nodeMajor -lt 20) { throw "Node 20 or newer is required (found v$nodeMajor)." }
+$nodeVersion = [version]((node --version) -replace '^v', '')
+if ($nodeVersion -lt [version]'22.12.0') { throw "Node 22.12 or newer is required (found v$nodeVersion)." }
 Ok "Node $(node --version)"
 
 Install-IfMissing -Command 'git' -WingetId 'Git.Git' -Label 'Git' -Optional | Out-Null
 Install-IfMissing -Command 'gh'  -WingetId 'GitHub.cli' -Label 'GitHub CLI' -Optional | Out-Null
 
 if (Test-Cmd 'claude') {
-  Ok 'Claude Code found — the studying step can use your Claude subscription'
+  Ok 'Claude Code found - the studying step can use your Claude subscription'
 } elseif ($env:ANTHROPIC_API_KEY) {
-  Ok 'ANTHROPIC_API_KEY set — the studying step will use the API'
+  Ok 'ANTHROPIC_API_KEY set - the studying step will use the API'
 } else {
   Note 'No Claude Code and no ANTHROPIC_API_KEY. Searching and reading code will work;'
   Note 'writing the documents will not until you install Claude Code and sign in.'
@@ -74,96 +90,43 @@ if (Test-Cmd 'claude') {
 
 # ---------------------------------------------------------------------- build
 Step 'Building the tool'
-Push-Location $root
+Push-Location -LiteralPath $root
 try {
-  if (Test-Path (Join-Path $root 'package-lock.json')) { npm ci } else { npm install }
-  npm run build
+  if (Test-Path -LiteralPath (Join-Path $root 'package-lock.json')) {
+    Invoke-Checked 'npm ci' { npm ci }
+  } else {
+    Invoke-Checked 'npm install' { npm install }
+  }
+  Invoke-Checked 'npm run build' { npm run build }
   Ok 'Built to dist/'
 } finally {
   Pop-Location
 }
 
-# --------------------------------------------------------------------- config
-Step 'Writing configuration'
+# ------------------------------------------------- config and Claude Desktop
+# The tool's own init writes both: it reads and writes JSON without changing anything it
+# did not set, keeps the first backup of the Claude Desktop config, and registers this
+# clone's server with --config, so it reads this clone's config wherever it is started.
+Step 'Writing configuration and connecting Claude Desktop'
 $configPath = Join-Path $root 'expert.config.json'
-if (-not $ReposDir) { $ReposDir = Join-Path $root 'repos' }
-$ReposDir = $ReposDir -replace '\\', '/'
-
-if (Test-Path $configPath) {
-  Note "expert.config.json already exists — leaving it alone."
-  Note "Edit it by hand if you want to change reposDir."
-} else {
-  $config = [ordered]@{
-    reposDir             = $ReposDir
-    knowledgeDir         = './knowledge'
-    model                = 'claude-sonnet-5'
-    excludeRepos         = @()
-    includeArchived      = $false
-    curateConcurrency    = 2
-    curateTimeoutMinutes = 25
-  }
-  if ($GithubUser) { $config.Insert(0, 'githubUser', $GithubUser) }
-  $config | ConvertTo-Json -Depth 4 | Set-Content -Path $configPath -Encoding utf8
-  Ok "Wrote expert.config.json (reposDir = $ReposDir)"
-  if (-not $GithubUser) {
-    Note 'No GitHub username set — that is fine. Copy or clone project folders into'
-    Note "$ReposDir and they are analyzable immediately."
-  }
+$cli = Join-Path $root 'dist\cli\index.js'
+$initArgs = @($cli, '--config', $configPath, 'init', '--name', 'dev', '--yes')
+if ($ReposDir) {
+  $initArgs += @('--repos-dir', $ReposDir)
+} elseif (-not (Test-Path -LiteralPath $configPath)) {
+  # First run with no folder given: the repos/ folder in this clone. On a re-run the
+  # existing config already says where the projects are, and init reports it.
+  $initArgs += @('--repos-dir', (Join-Path $root 'repos'))
 }
-
-# ------------------------------------------------------------- claude desktop
-if (-not $SkipClaudeDesktop) {
-  Step 'Connecting to Claude Desktop'
-  $desktopConfig = Join-Path $env:APPDATA 'Claude\claude_desktop_config.json'
-  $entryPoint = (Join-Path $root 'dist/cli/index.js') -replace '\\', '/'
-
-  # Built without ConvertFrom-Json -AsHashtable so this also runs on the Windows
-  # PowerShell 5.1 that ships with Windows, not just PowerShell 7.
-  $existing = $null
-  $readable = $true
-  if (Test-Path $desktopConfig) {
-    $backup = "$desktopConfig.backup"
-    Copy-Item $desktopConfig $backup -Force
-    Ok "Backed up existing config to $backup"
-    try {
-      $existing = Get-Content $desktopConfig -Raw | ConvertFrom-Json
-    } catch {
-      $readable = $false
-      Note 'Existing config is not valid JSON — not touching it. Add this entry yourself:'
-      Note "  `"repos-expert`": { `"command`": `"node`", `"args`": [`"$entryPoint`", `"mcp`"] }"
-    }
-  } else {
-    New-Item -ItemType Directory -Force -Path (Split-Path $desktopConfig) | Out-Null
-  }
-
-  if ($readable) {
-    $servers = [ordered]@{}
-    $out = [ordered]@{}
-    if ($existing) {
-      foreach ($prop in $existing.PSObject.Properties) {
-        if ($prop.Name -eq 'mcpServers') {
-          foreach ($server in $prop.Value.PSObject.Properties) { $servers[$server.Name] = $server.Value }
-        } else {
-          $out[$prop.Name] = $prop.Value
-        }
-      }
-    }
-    $servers['repos-expert'] = [ordered]@{
-      command = 'node'
-      args    = @($entryPoint, 'mcp')
-    }
-    $out['mcpServers'] = $servers
-    $out | ConvertTo-Json -Depth 8 | Set-Content -Path $desktopConfig -Encoding utf8
-    Ok 'Added repos-expert to Claude Desktop (other servers left untouched)'
-    Note 'Quit Claude Desktop from the system tray and reopen it to pick this up.'
-  }
-}
+if ($GithubUser) { $initArgs += @('--github-user', $GithubUser) }
+if ($SkipClaudeDesktop) { $initArgs += '--skip-client' }
+Invoke-Checked 'expert init' { node @initArgs }
 
 # ----------------------------------------------------------------- next steps
-Step 'Done — what to do next'
+Step 'Done - what to do next'
 Write-Host @"
-   1. Put project folders in:  $ReposDir
-      (or run: node dist/cli/index.js sync   — needs githubUser + gh login)
+   1. Put project folders in the projects folder named above
+      (or list git URLs in its repos.txt and run: node dist/cli/index.js sync)
 
    2. See what it found:
       node dist/cli/index.js status
