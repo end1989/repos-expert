@@ -24,6 +24,12 @@ updates:
       - dependency-name: '@types/node'
         update-types: ['version-update:semver-major']
     groups:
+      # The Agent SDK bundles the Claude Code runtime whose path and glob handling the
+      # curator's confinement hook mirrors. It is pinned exactly, and each new version
+      # arrives as its own PR, where CI's runtime job runs the real runtime against it.
+      # A dependency goes to the first group it matches, so this one comes first.
+      agent-sdk:
+        patterns: ['@anthropic-ai/claude-agent-sdk']
       minor-and-patch:
         update-types: [minor, patch]
     labels: [dependencies]
