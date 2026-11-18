@@ -1,7 +1,12 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
-import { resolveWithin, readFileCapped, MAX_READ_LINES, MAX_READ_BYTES } from '../src/mcp/guards.js';
+import {
+  resolveWithin,
+  readFileCapped,
+  MAX_READ_LINES,
+  MAX_READ_BYTES,
+} from '../src/mcp/guards.js';
 import { makeTempDir } from './helpers.js';
 
 // Set up junction capability check at module scope
@@ -61,8 +66,8 @@ describe('readFileCapped', () => {
     const big = Array.from({ length: 3000 }, (_, i) => `line ${i + 1}`).join('\n');
     fs.writeFileSync(path.join(dir, 'big.txt'), big);
 
-    // Create a file with ~300 lines × 1KB each (over 200 KB but under 2,000 lines)
-    const byteCapped = Array.from({ length: 300 }, (_, i) => 'x'.repeat(1024)).join('\n');
+    // ~300 lines × 1 KB each: over the byte cap, well under the line cap
+    const byteCapped = Array.from({ length: 300 }, () => 'x'.repeat(1024)).join('\n');
     fs.writeFileSync(path.join(dir, 'byte-cap.txt'), byteCapped);
   });
 
@@ -79,19 +84,52 @@ describe('readFileCapped', () => {
     expect(out).not.toContain('one');
   });
 
-  it('caps at MAX_READ_LINES and appends a notice', () => {
+  it('caps at MAX_READ_LINES and says exactly where to continue', () => {
     const out = readFileCapped(path.join(dir, 'big.txt'));
     const lines = out.split('\n');
     expect(lines.length).toBe(MAX_READ_LINES + 1);
-    expect(lines.at(-1)).toContain('truncated');
     expect(lines[0]).toBe('line 1');
+    expect(lines[MAX_READ_LINES - 1]).toBe('line 2000');
+    expect(lines.at(-1)).toBe('… showing lines 1–2000 of 3000. Continue with startLine: 2001.');
   });
 
-  it('caps at MAX_READ_BYTES and appends a notice', () => {
+  it('caps at MAX_READ_BYTES on a whole line, and says where to continue', () => {
     const out = readFileCapped(path.join(dir, 'byte-cap.txt'));
-    expect(out).toContain('truncated');
-    const byteLength = Buffer.byteLength(out, 'utf8');
-    expect(byteLength).toBeLessThan(MAX_READ_BYTES + 100); // Some buffer for the notice text
+    expect(Buffer.byteLength(out, 'utf8')).toBeLessThan(MAX_READ_BYTES + 200);
+    const lines = out.split('\n');
+    const shown = lines.length - 1;
+    expect(lines.slice(0, shown).every((l) => l === 'x'.repeat(1024))).toBe(true); // no half lines
+    expect(lines.at(-1)).toBe(
+      `… showing lines 1–${shown} of 300. Continue with startLine: ${shown + 1}.`,
+    );
+  });
+
+  it('keeps the cap well under what MCP clients accept inline in one result', () => {
+    // Claude Code moves any text result over 50,000 characters out of the conversation.
+    expect(MAX_READ_BYTES).toBeLessThanOrEqual(48 * 1024);
+  });
+
+  it('counts the continuation from where the requested range began', () => {
+    const out = readFileCapped(path.join(dir, 'big.txt'), 500);
+    const lines = out.split('\n');
+    expect(lines[0]).toBe('line 500');
+    expect(lines.at(-1)).toBe('… showing lines 500–2499 of 3000. Continue with startLine: 2500.');
+  });
+
+  it('says when the requested range starts past the end of the file', () => {
+    expect(() => readFileCapped(path.join(dir, 'small.txt'), 10)).toThrow(/has 3 lines/);
+  });
+
+  it('refuses a range that ends before it starts', () => {
+    expect(() => readFileCapped(path.join(dir, 'small.txt'), 3, 2)).toThrow(/endLine/);
+  });
+
+  it('does not dump a binary file into the conversation', () => {
+    fs.writeFileSync(
+      path.join(dir, 'blob.bin'),
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0x01, 0x02, 0x00]),
+    );
+    expect(readFileCapped(path.join(dir, 'blob.bin'))).toBe('Binary file (8 bytes) — not shown.');
   });
 
   it('rejects reading a directory', () => {
