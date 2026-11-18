@@ -176,8 +176,8 @@ export function corpus(): string[] {
 export async function leakingGlobs(rg: Ripgrep, root: string): Promise<string[]> {
   const globs = corpus();
   const searched: (string[] | null)[] = [];
-  for (let i = 0; i < globs.length; i += 8) {
-    const batch = globs.slice(i, i + 8);
+  for (let i = 0; i < globs.length; i += 16) {
+    const batch = globs.slice(i, i + 16);
     searched.push(...(await Promise.all(batch.map((g) => filesRipgrepSearches(rg, root, g)))));
   }
   return globs.filter((_, i) => reachesGit(searched[i] ?? null));

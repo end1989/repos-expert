@@ -49,13 +49,17 @@ Breaking any of these is a vulnerability we want to hear about.
    `src/curator/confine.ts`): the session's tool set is exactly Read, Glob and Grep;
    anything not pre-approved is denied (`permissionMode: 'dontAsk'`, nothing bypassed); no
    user, project or local settings are loaded, so neither your own hooks and plugins nor a
-   `.claude/` folder inside the studied repository configure the agent; no MCP servers are
+   `.claude/` folder inside the studied repository configure the agent; your Claude Code
+   auto-memory for the folder is not read (`autoMemoryEnabled: false`), and your ripgrep
+   config (`RIPGREP_CONFIG_PATH`) is not passed on; no MCP servers are
    connected; and a PreToolUse hook judges every path as the runtime will use it —
    trimmed, with `~` and Git Bash drive paths (`/c/…`) expanded the way the runtime
    expands them after the hook has run — and refuses any path outside the repository (links
    followed to where they land), any path into `.git` (Windows aliases included), a network
    path (refused before anything resolves it: resolving `\\host\share` offers that host the
-   user's NTLM credentials), and on Windows a drive-relative path such as `C:secret`. A
+   user's NTLM credentials), and on Windows a drive-relative path such as `C:secret` or a
+   name ending in a dot or a space, which Node opens as written but ripgrep reads, through
+   the Win32 path rules, as the name beside it. A
    Grep with no path relies on the runtime passing ripgrep `--glob !.git`, and in ripgrep
    the later glob wins, so a Grep glob that could match a folder named `.git` at any depth
    is refused (`*`, `{.git,x}`, `vendor/**`). The glob is judged in the pieces the runtime

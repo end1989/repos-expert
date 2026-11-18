@@ -45,12 +45,16 @@ const CANARY = {
   nestedGit: 'CANARY_NESTED_GIT_8f2',
 };
 
-/** Text in the studied repository's own Claude configuration, which must not be loaded. */
+/**
+ * Text in the studied repository's own Claude configuration, and in the operator's
+ * auto-memory for it, which must not be loaded.
+ */
 const REPO_CONFIG = {
   claudeMd: 'CANARY_REPO_CLAUDE_MD_1c1',
   nestedClaudeMd: 'CANARY_NESTED_CLAUDE_MD_2c2',
   agentsMd: 'CANARY_AGENTS_MD_3c3',
   skill: 'CANARY_SKILL_4c4',
+  autoMemory: 'CANARY_AUTO_MEMORY_5c5',
 };
 
 const SOURCE = 'CANARY_SOURCE_OK';
@@ -106,6 +110,16 @@ plant(
   path.join(repo, '.mcp.json'),
   JSON.stringify({ mcpServers: { canary: { command: 'node', args: [mark, 'mcp-server'] } } }),
 );
+// The operator's auto-memory for the folder being studied: <config>/projects/<the folder's
+// path, every other character a dash>/memory/MEMORY.md. Planted for the path as given and
+// as resolved, which differ where the temp folder is reached through a link (macOS).
+for (const folder of new Set([repo, fs.realpathSync.native(repo)])) {
+  const project = folder.replace(/[^A-Za-z0-9]/g, '-');
+  plant(
+    path.join(configDir, 'projects', project, 'memory', 'MEMORY.md'),
+    `- [note](note.md) - ${REPO_CONFIG.autoMemory}\n`,
+  );
+}
 fs.mkdirSync(configDir, { recursive: true });
 
 /**
@@ -182,6 +196,18 @@ const ATTACKS: ToolCase[] = [
   },
 ];
 
+if (process.platform === 'win32') {
+  // A real folder "xd." beside a link "xd" out of the repository: Node opens "xd." as
+  // written, ripgrep drops the dot under the Win32 path rules and searches the link.
+  fs.mkdirSync(`\\\\?\\${path.join(repo, 'xd.')}`);
+  fs.symlinkSync(outside, path.join(repo, 'xd'), 'junction');
+  ATTACKS.push({
+    label: 'Grep a folder named with a trailing dot, beside a link out',
+    tool: 'Grep',
+    input: { pattern: 'CANARY', path: 'xd.', output_mode: 'content' },
+  });
+}
+
 /** And one ordinary search, so a run in which no tool worked at all cannot pass. */
 const CONTROL: ToolCase = {
   label: 'Grep the source',
@@ -245,8 +271,13 @@ let loosened: Session;
 
 beforeAll(async () => {
   curator = await session();
-  // The control: mention expansion on, and the repository's own settings and memory loaded.
-  loosened = await session({ verbatimPrompts: false, settingSources: ['project', 'local'] });
+  // The control: mention expansion on, the repository's own settings and memory loaded, and
+  // the operator's auto-memory on.
+  loosened = await session({
+    verbatimPrompts: false,
+    settingSources: ['project', 'local'],
+    settings: {},
+  });
 }, 480_000);
 
 afterAll(async () => {
@@ -290,8 +321,9 @@ describe('the control: with the protections switched off, the same session leaks
     expect(leakedInto(loosened.api.bodies, CANARY)).toContain(CANARY.home);
   });
 
-  it("runs the repository's own hooks and loads its memory", () => {
+  it("runs the repository's own hooks and loads its memory, and the operator's", () => {
     expect(loosened.markers).toContain('session-start');
     expect(leakedInto(loosened.api.bodies, REPO_CONFIG)).toContain(REPO_CONFIG.claudeMd);
+    expect(leakedInto(loosened.api.bodies, REPO_CONFIG)).toContain(REPO_CONFIG.autoMemory);
   });
 });

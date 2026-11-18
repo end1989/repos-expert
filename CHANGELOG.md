@@ -29,7 +29,9 @@ patch bumps are fixes and additive changes). Dates are npm publish dates (UTC).
   with `!]` or `^]`, where ripgrep reads that `]` as a member (`.gi[!]]` is `.git`). An absolute
   Glob pattern is judged by the folder the runtime lists, the text before its first
   wildcard trimmed as the runtime trims it, so `<repo>/.. /*` cannot list the repository's
-  parent. Each refusal is unit-tested (`tests/confine.test.ts`). The Grep-glob rule is also
+  parent. On Windows a name ending in a dot or a space is refused: Node opens a real folder
+  `xd.` as written, but ripgrep drops the dot under the Win32 path rules and searched `xd`,
+  a link out of the repository beside it. Each refusal is unit-tested (`tests/confine.test.ts`). The Grep-glob rule is also
   tested against ripgrep itself, over every pairing of a few dozen globs that try to reopen
   `.git`: against this project's ripgrep, and against the one inside the runtime, which
   reads some globs differently (`tests/confine-ripgrep.test.ts`,
@@ -42,7 +44,12 @@ patch bumps are fixes and additive changes). Dates are npm publish dates (UTC).
   `npm run test:runtime` runs the runtime the SDK bundles against a fake Messages API on
   127.0.0.1 (no tokens, no network) and fails if anything from outside the repository, or
   from `.git`, reaches the model, or if the studied repository's own `CLAUDE.md`, hooks,
-  MCP servers or skills are loaded. A control session with those protections switched off
+  MCP servers or skills are loaded. The runtime also read the operator's own auto-memory
+  for the folder, even with no settings loaded, as instructions that override its
+  defaults; the session now turns it off (`autoMemoryEnabled: false`). It no longer passes
+  on `RIPGREP_CONFIG_PATH`, whose `--follow` made Glob list files behind a link out of the
+  repository when the runtime used the system ripgrep. A control session with those
+  protections switched off
   shows each planted attack is live. CI runs it on Linux, macOS and Windows. The Agent SDK
   is pinned to an exact version, and Dependabot proposes each new one on its own, so that
   test meets every runtime before it ships.

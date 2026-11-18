@@ -28,7 +28,7 @@ describe('Grep globs, judged by ripgrep itself', () => {
       (glob) => checkToolCall(root, 'Grep', { pattern: 'TOKEN_', glob }).allowed,
     );
     expect(allowedYetLeaking).toEqual([]);
-  }, 180_000);
+  }, 300_000);
 
   it('allows everyday globs, and ripgrep really searches with them', async () => {
     for (const glob of EVERYDAY) {

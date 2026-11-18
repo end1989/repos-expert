@@ -103,8 +103,9 @@ so its privileges are fixed in `src/curator/agent.ts`: the built-in tool set is 
 Read, Glob and Grep (`tools` — `allowedTools` only pre-approves and restricts nothing),
 anything else is denied (`permissionMode: 'dontAsk'`), no user/project/local settings are
 loaded (`settingSources: []`, so the studied repo's own `.claude/` cannot configure it), no
-MCP servers are connected, the prompt is delivered as written (`verbatimPrompts`, so an
-`@path` in a commit subject attaches nothing), and a PreToolUse hook (`confine.ts`) refuses
+MCP servers are connected, the operator's auto-memory is not read, the prompt is delivered
+as written (`verbatimPrompts`, so an `@path` in a commit subject attaches nothing), and a
+PreToolUse hook (`confine.ts`) refuses
 any path outside the repository, following links. Each of these is tested, and the whole is
 tested against the real runtime the SDK bundles (`npm run test:runtime`, below).
 

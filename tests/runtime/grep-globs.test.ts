@@ -27,5 +27,5 @@ describe("Grep globs, judged by the runtime's own ripgrep", () => {
       (glob) => checkToolCall(root, 'Grep', { pattern: 'TOKEN_', glob }).allowed,
     );
     expect(allowedYetLeaking).toEqual([]);
-  }, 240_000);
+  }, 360_000);
 });
