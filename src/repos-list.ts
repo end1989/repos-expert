@@ -85,7 +85,9 @@ export function parseReposList(text: string): ParsedReposList {
       name = named[1]!;
       url = expandShorthand(named[2]!.trim());
       if (!VALID_NAME.test(name) || name === '.' || name === '..') {
-        problems.push(`line ${lineNo}: "${name}" is not a usable folder name (letters, digits, . _ - only)`);
+        problems.push(
+          `line ${lineNo}: "${name}" is not a usable folder name (letters, digits, . _ - only)`,
+        );
         return;
       }
     } else {
@@ -94,16 +96,22 @@ export function parseReposList(text: string): ParsedReposList {
     }
 
     if (!isSupportedUrl(url)) {
-      problems.push(`line ${lineNo}: "${url}" is not a git URL I will clone (https, ssh, git, or user@host:path)`);
+      problems.push(
+        `line ${lineNo}: "${url}" is not a git URL I will clone (https, ssh, git, or user@host:path)`,
+      );
       return;
     }
     if (name === null) {
-      problems.push(`line ${lineNo}: cannot work out a folder name from "${url}" — write it as "name = ${url}"`);
+      problems.push(
+        `line ${lineNo}: cannot work out a folder name from "${url}" — write it as "name = ${url}"`,
+      );
       return;
     }
     const already = seen.get(name);
     if (already !== undefined) {
-      problems.push(`line ${lineNo}: "${name}" is already listed as ${already} — keeping the first one`);
+      problems.push(
+        `line ${lineNo}: "${name}" is already listed as ${already} — keeping the first one`,
+      );
       return;
     }
     seen.set(name, url);
@@ -149,13 +157,19 @@ export function addToReposList(file: string, urls: string[]): AddResult {
     fs.mkdirSync(path.dirname(file), { recursive: true });
     let body = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : reposListTemplate();
     if (body.length > 0 && !body.endsWith('\n')) body += '\n';
-    body += added.map((e) => (repoNameFromUrl(e.url) === e.name ? e.url : `${e.name} = ${e.url}`)).join('\n');
+    body += added
+      .map((e) => (repoNameFromUrl(e.url) === e.name ? e.url : `${e.name} = ${e.url}`))
+      .join('\n');
     fs.writeFileSync(file, `${body}\n`);
   }
 
   // These came from command-line arguments, not a file: "line 3" would send someone
   // looking for a line 3.
-  return { added, alreadyListed, problems: parsed.problems.map((p) => p.replace(/^line \d+: /, '')) };
+  return {
+    added,
+    alreadyListed,
+    problems: parsed.problems.map((p) => p.replace(/^line \d+: /, '')),
+  };
 }
 
 /** Written into a new list file so an empty list still tells you what to do with it. */
