@@ -66,7 +66,8 @@ Breaking any of these is a vulnerability we want to hear about.
    hands ripgrep, and syntax ripgrep could read differently from the hook is refused: a
    backslash (an escape to ripgrep), a `}` that closes nothing (which the runtime's
    ripgrep drops), a `[class]` holding `/` or opening with `!]` or `^]` (whose `]` ripgrep
-   reads as a member). An absolute Glob pattern is judged by the
+   reads as a member), a NEXT LINE character (which ripgrep trims and the runtime does not
+   split on). An absolute Glob pattern is judged by the
    folder the runtime lists, the text before its first wildcard, trimmed as the runtime
    trims it. The prompt is delivered as written (`verbatimPrompts`), so an `@path` in a
    commit subject, a branch name or an earlier document does not make the runtime attach

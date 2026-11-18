@@ -26,7 +26,9 @@ patch bumps are fixes and additive changes). Dates are npm publish dates (UTC).
   words whole. Syntax that ripgrep could read differently from the hook is refused: a
   backslash, which ripgrep reads as an escape; a `}` that closes nothing, which the
   runtime's ripgrep drops (`.gi}t` is `.git` to it); a `[class]` holding `/`, or opening
-  with `!]` or `^]`, where ripgrep reads that `]` as a member (`.gi[!]]` is `.git`). An absolute
+  with `!]` or `^]`, where ripgrep reads that `]` as a member (`.gi[!]]` is `.git`); a NEXT
+  LINE character (U+0085), which ripgrep trims from a glob but the runtime does not split
+  on (`*` followed by one reaches ripgrep as `*`). An absolute
   Glob pattern is judged by the folder the runtime lists, the text before its first
   wildcard trimmed as the runtime trims it, so `<repo>/.. /*` cannot list the repository's
   parent. On Windows a name ending in a dot or a space is refused: Node opens a real folder

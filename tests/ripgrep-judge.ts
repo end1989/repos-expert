@@ -128,6 +128,11 @@ const OPENERS = [
   '.gi[!]]',
   '.gi[^]]',
   '.gi[!]x]',
+  '[!]]*',
+  '[^]]*',
+  '*\u0085',
+  '.git\u0085',
+  'vendor/**\u0085',
 ];
 const PICKERS = [
   'config',
@@ -144,6 +149,8 @@ const PICKERS = [
   '*/*/.gi?/**',
   '.gi[!]]/conf?g',
   '.gi[^]]/conf?g',
+  'conf[!]]g',
+  'config\u0085',
 ];
 
 /** Globs a curator writes, which must stay allowed. */
@@ -157,6 +164,7 @@ export const EVERYDAY = [
   '*.test.ts *.spec.ts',
   'docs/*.md,*.txt',
   'package.json',
+  '**/*.ts !**/node_modules/**',
 ];
 
 /** Every opener and picker alone, and every pairing of the two, joined three ways. */

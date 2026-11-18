@@ -226,6 +226,9 @@ describe('checkToolCall — what the curator may touch', () => {
       'docs/*.md,*.txt',
       'package.json',
       '.github/workflows/*.yml',
+      // An exclusion after an inclusion: judged piece by piece, never as one glob.
+      '**/*.ts !**/node_modules/**',
+      '*.ts,!dist/**',
     ];
     for (const glob of everyday) {
       expect(checkToolCall(repo, 'Grep', { pattern: 'url', glob }), glob).toEqual({
@@ -251,6 +254,11 @@ describe('checkToolCall — what the curator may touch', () => {
       '.gi[!]] .gi[!]]/conf?g',
       '.gi[^]] .gi[^]]/conf?g',
       '.gi[!]x] .gi[!]x]/conf?g',
+      '[!]]*',
+      // ripgrep trims a trailing NEXT LINE (U+0085) from a glob; JavaScript's \s, which the
+      // runtime splits on, does not include it, so "*" + U+0085 reaches ripgrep as "*".
+      '*\u0085',
+      'vendor/**\u0085',
       '{src',
       'src/[ab',
       '[,]x',

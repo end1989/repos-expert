@@ -142,13 +142,13 @@ function piecesForRipgrep(glob: string): string[] {
 }
 
 /**
- * Every way of reading a Grep glob: the pieces above, and the glob whole, by whitespace
- * alone, and by whitespace and every comma — so a runtime that split it another way would
- * meet a refusal too.
+ * Every way of reading a Grep glob: the pieces above, and the glob split on whitespace and
+ * every comma, so a runtime that also split `{…}` words would meet a refusal too. (Read
+ * unsplit, an inclusion beside an exclusion, "*.ts,!dist/**", would be judged as one glob
+ * ending in **: a refusal of something ripgrep is never handed.)
  */
 function everyReading(glob: string): string[] {
-  const readings = [glob, ...glob.split(/\s+/), ...glob.split(/[\s,]+/), ...piecesForRipgrep(glob)];
-  return [...new Set(readings)].filter(includes);
+  return [...new Set([...glob.split(/[\s,]+/), ...piecesForRipgrep(glob)])].filter(includes);
 }
 
 /**
@@ -157,11 +157,13 @@ function everyReading(glob: string): string[] {
  * holding `/` is one character to ripgrep (`[.-/]git` is `.git`) but is split at the slash
  * here, and one holding `,`, `{` or `}` is split or grouped differently; after a negation,
  * ripgrep reads the first `]` as a member (`[!]]` is "not ]", so `.gi[!]]` is `.git`) where
- * this matcher closes the class; versions disagree on an unclosed `{` or `[`. No glob anyone
- * means needs any of it. (Nested groups are left to the matcher, which refuses them with its
- * own reason.)
+ * this matcher closes the class; versions disagree on an unclosed `{` or `[`. ripgrep also
+ * trims a trailing NEXT LINE (U+0085), which the runtime does not split on, being outside
+ * JavaScript's \s: "*" + U+0085 reaches ripgrep as "*". No glob anyone means needs any of
+ * it. (Nested groups are left to the matcher, which refuses them with its own reason.)
  */
 function readsAmbiguously(piece: string): boolean {
+  if (piece.includes('\u0085')) return true;
   let depth = 0;
   for (let i = 0; i < piece.length; i++) {
     const c = piece[i];
@@ -194,7 +196,7 @@ function grepGlobProblem(given: string): string | null {
     return `the pattern "${given}" contains "\\", which ripgrep reads as an escape, not a folder separator: write folders with "/"`;
   }
   if (piecesForRipgrep(given).some(readsAmbiguously)) {
-    return `the pattern "${given}" has a } that closes nothing, an unclosed { or [, a [...] holding / , { or }, or one opening with !] or ^], which ripgrep and this check could read differently`;
+    return `the pattern "${given}" has a } that closes nothing, an unclosed { or [, a [...] holding / , { or }, one opening with !] or ^], or a NEXT LINE character, which ripgrep and this check could read differently`;
   }
   for (const piece of everyReading(given)) {
     const unreadable = unreadableGlob(piece);
