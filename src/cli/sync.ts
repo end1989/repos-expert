@@ -123,12 +123,17 @@ export async function syncRepos(
     }
     const dest = path.join(cfg.reposDir, target.name);
     const isClone = !fs.existsSync(path.join(dest, '.git'));
-    // Whether this run made the folder. Only that run may remove it: a sync running at the
-    // same time can also find the repo missing, and its failed clone must not delete ours.
+    // Whether this run made the folder. Only that run clones into it, and only that run may
+    // remove it: a sync running at the same time can also find the repo missing.
     let created = false;
     try {
       if (isClone) {
-        created = createFolder(dest);
+        if (!createFolder(dest)) {
+          throw new Error(
+            `${dest} already exists but is not a git repository. If another sync is cloning it, let that finish; otherwise remove the folder and sync again.`,
+          );
+        }
+        created = true;
         await deps.clone(target.url, dest);
       } else {
         await target.refresh(dest);

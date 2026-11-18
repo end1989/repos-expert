@@ -99,6 +99,29 @@ describe('syncRepos when things go wrong', () => {
     expect(fs.readFileSync(path.join(dest, 'README.md'), 'utf8')).toBe('cloned by the winner');
   });
 
+  it('never clones into a folder it did not create, so it can never remove another run’s clone', async () => {
+    // Another sync has just claimed the name and not yet written .git. Cloning into its
+    // folder would let whichever clone fails delete the one that succeeded.
+    const cfg = { ...makeCfg(makeTempDir('expert-sync-')), githubUser: null };
+    writeList(cfg, 'https://github.com/acme/busy.git');
+    const dest = path.join(cfg.reposDir, 'busy');
+    fs.mkdirSync(dest, { recursive: true });
+    const cloned: string[] = [];
+    const res = await syncRepos(
+      cfg,
+      noDeps({
+        clone: async (_url, to) => {
+          cloned.push(to);
+        },
+      }),
+    );
+    expect(cloned).toEqual([]);
+    expect(res.failed).toEqual([
+      { name: 'busy', error: expect.stringMatching(/already exists[\s\S]*not a git repository/) },
+    ]);
+    expect(fs.existsSync(dest)).toBe(true);
+  });
+
   it('reports a partial clone it could not remove, and carries on with the next repo', async () => {
     const cfg = { ...makeCfg(makeTempDir('expert-sync-')), githubUser: null };
     writeList(

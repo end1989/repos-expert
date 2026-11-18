@@ -95,8 +95,9 @@ patch bumps are fixes and additive changes). Dates are npm publish dates (UTC).
   cloned afresh) could never be studied again.
 - A clone that failed partway left a folder the next sync reported as synced; it is
   removed — only by the sync that created the folder, so a sync running at the same time
-  never deletes another's clone. A removal that fails (a file still held open on Windows)
-  is reported with that repo, and the batch carries on. A failing `gh` no longer stops the
+  never deletes another's clone. A folder that is already there but is not a repository is
+  reported rather than cloned into. A removal that fails (a file still held open on
+  Windows) is reported with that repo, and the batch carries on. A failing `gh` no longer stops the
   repos in `repos.txt` from being cloned.
 - The curator prompt said "exactly the four documents" in one place while the parser
   requires five, so a model that obeyed it failed the parse and was paid to run again.
