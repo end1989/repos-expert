@@ -44,6 +44,10 @@ patch bumps are fixes and additive changes). Dates are npm publish dates (UTC).
   refused). The curator's hook refuses `.git` the same way, and refuses Windows
   drive-relative paths (`C:secret`), which resolve against a folder nobody chose.
   `read_repo_file` refuses a path over 4,096 characters before resolving it.
+- **A file cannot change between being checked and being used.** `read_repo_file` checks a
+  file and reads it through one open handle, so the file that passed the checks is the one
+  returned. `expert init` creates its files, and its Claude Desktop backup, in one
+  exclusive step, so a file written meanwhile is kept rather than replaced.
 - **A file name cannot pose as a path.** Linux and macOS allow a newline in a file name, and
   search output split there passed the rest of the name off as a file of its own, which
   could name a file in another repo. Such files are now skipped, so a name can neither pose

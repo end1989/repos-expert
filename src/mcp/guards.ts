@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { isInside, resolveReal } from '../paths.js';
+import { errorCode, isInside, resolveReal } from '../paths.js';
 
 /**
  * One read is at most this many lines or bytes, whichever comes first. The byte cap keeps
@@ -37,19 +37,45 @@ export function resolveWithin(rootDir: string, relPath: string): string {
 export { namesGitDir } from '../paths.js';
 
 /**
+ * The file's bytes, checked and read through one open handle: the file that passed the
+ * checks is the file that is read, and one that grows meanwhile is read only as far as it
+ * reached when it was checked.
+ */
+function readWithinLimits(absPath: string): Buffer {
+  const isDirectory = (): Error => new Error(`Path is a directory, not a file: ${absPath}`);
+  let fd: number;
+  try {
+    fd = fs.openSync(absPath, 'r');
+  } catch (err) {
+    if (errorCode(err) === 'EISDIR') throw isDirectory();
+    throw err;
+  }
+  try {
+    const stat = fs.fstatSync(fd);
+    if (stat.isDirectory()) throw isDirectory();
+    if (stat.size > MAX_FILE_BYTES) {
+      throw new Error('File too large to read (over 5 MB). Search it with search_code instead.');
+    }
+    const buffer = Buffer.alloc(stat.size);
+    let filled = 0;
+    while (filled < buffer.length) {
+      const read = fs.readSync(fd, buffer, filled, buffer.length - filled, filled);
+      if (read === 0) break; // shorter now than when it was checked
+      filled += read;
+    }
+    return buffer.subarray(0, filled);
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+/**
  * Reads `absPath` from `startLine` (1-based, inclusive) to `endLine`, within the caps.
  * Cuts only at a line boundary, so "continue with startLine N" picks up exactly where
  * the text stopped.
  */
 export function readFileCapped(absPath: string, startLine?: number, endLine?: number): string {
-  const stat = fs.statSync(absPath);
-  if (stat.isDirectory()) {
-    throw new Error(`Path is a directory, not a file: ${absPath}`);
-  }
-  if (stat.size > MAX_FILE_BYTES) {
-    throw new Error('File too large to read (over 5 MB). Search it with search_code instead.');
-  }
-  const buffer = fs.readFileSync(absPath);
+  const buffer = readWithinLimits(absPath);
   if (buffer.subarray(0, BINARY_SNIFF_BYTES).includes(0)) {
     return `Binary file (${buffer.length} bytes) — not shown.`;
   }

@@ -53,6 +53,11 @@ function decodeText(bytes: Buffer): string {
   return bytes.toString('utf8');
 }
 
+/** The `code` of a Node.js system error (`ENOENT`, `EEXIST`, …), or undefined. */
+export function errorCode(err: unknown): unknown {
+  return err instanceof Error && 'code' in err ? err.code : undefined;
+}
+
 /** `C:foo` on Windows: relative to the current folder of drive C, wherever that is. */
 export function isDriveRelative(p: string, platform: NodeJS.Platform = process.platform): boolean {
   return platform === 'win32' && /^[A-Za-z]:(?![\\/])/.test(p);

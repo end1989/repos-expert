@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { loadConfig, userConfigPath } from '../config.js';
-import { readTextFile } from '../paths.js';
+import { errorCode, readTextFile } from '../paths.js';
 import { REPOS_LIST_FILENAME, reposListTemplate } from '../repos-list.js';
 
 export const PACKAGE_NAME = 'repos-expert';
@@ -325,9 +325,48 @@ function configuredFolders(
  * and only what was asked for changes — the excluded repos, the spending cap and the model
  * endpoint someone set up survive a change of folder.
  */
+/**
+ * Writes `file` only if nothing is there yet. The check and the write are one exclusive
+ * create, so a file that appears in between is kept, not replaced. False if one exists.
+ */
+function writeIfAbsent(file: string, body: string): boolean {
+  try {
+    fs.writeFileSync(file, body, { flag: 'wx' });
+    return true;
+  } catch (err) {
+    if (errorCode(err) === 'EEXIST') return false;
+    throw err;
+  }
+}
+
+/** Copies `from` to `to` only if `to` does not exist yet, in one exclusive step. */
+function copyIfAbsent(from: string, to: string): boolean {
+  try {
+    fs.copyFileSync(from, to, fs.constants.COPYFILE_EXCL);
+    return true;
+  } catch (err) {
+    if (errorCode(err) === 'EEXIST') return false;
+    throw err;
+  }
+}
+
+/** The file's text, or null when there is no file there. */
+function readTextFileIfPresent(file: string): string | null {
+  try {
+    return readTextFile(file);
+  } catch (err) {
+    if (errorCode(err) === 'ENOENT') return null;
+    throw err;
+  }
+}
+
+function isFolder(p: string): boolean {
+  return fs.statSync(p, { throwIfNoEntry: false })?.isDirectory() === true;
+}
+
 function forceConfig(opts: InitOptions, configPath: string, askedFor: string | undefined): string {
   const backup = `${configPath}.backup`;
-  if (!fs.existsSync(backup)) fs.copyFileSync(configPath, backup);
+  copyIfAbsent(configPath, backup);
   let current: unknown = null;
   try {
     current = JSON.parse(readTextFile(configPath));
@@ -351,19 +390,17 @@ export function runInit(opts: InitOptions, paths: InitPaths): InitResult {
   const notes: string[] = [];
   let configWritten = false;
 
-  if (fs.existsSync(paths.configPath) && fs.statSync(paths.configPath).isDirectory()) {
+  if (isFolder(paths.configPath)) {
     throw new Error(
       `${paths.configPath} is a folder: --config names the config file itself, such as ${path.join(paths.configPath, 'expert.config.json')}`,
     );
   }
   const askedFor = opts.reposDir !== undefined ? resolveFolderAnswer(opts.reposDir) : undefined;
 
-  if (!fs.existsSync(paths.configPath)) {
-    fs.mkdirSync(path.dirname(paths.configPath), { recursive: true });
-    fs.writeFileSync(
-      paths.configPath,
-      defaultConfigBody({ ...opts, reposDir: askedFor }, paths.configPath),
-    );
+  // Created only if absent, in one step: a config another run writes meanwhile is kept.
+  fs.mkdirSync(path.dirname(paths.configPath), { recursive: true });
+  const body = defaultConfigBody({ ...opts, reposDir: askedFor }, paths.configPath);
+  if (writeIfAbsent(paths.configPath, body)) {
     configWritten = true;
   } else if (opts.force === true) {
     notes.push(forceConfig(opts, paths.configPath, askedFor));
@@ -399,11 +436,10 @@ export function runInit(opts: InitOptions, paths: InitPaths): InitResult {
   if (listPath !== null) {
     try {
       fs.mkdirSync(path.dirname(listPath), { recursive: true });
-      if (fs.existsSync(listPath)) {
-        notes.push(`Your project list is already there: ${listPath}`);
-      } else {
-        fs.writeFileSync(listPath, reposListTemplate());
+      if (writeIfAbsent(listPath, reposListTemplate())) {
         notes.push(`Wrote your project list: ${listPath} — put git URLs in it, one per line.`);
+      } else {
+        notes.push(`Your project list is already there: ${listPath}`);
       }
       reposListPath = listPath;
     } catch (err) {
@@ -415,18 +451,17 @@ export function runInit(opts: InitOptions, paths: InitPaths): InitResult {
 
   if (opts.skipWorkspaceGuide !== true && !('problem' in configured)) {
     const guidePath = path.join(reposDir, 'CLAUDE.md');
-    if (fs.existsSync(guidePath)) {
-      notes.push(`Left your existing ${guidePath} alone.`);
-    } else {
-      try {
-        fs.mkdirSync(reposDir, { recursive: true });
-        fs.writeFileSync(guidePath, workspaceGuide());
+    try {
+      fs.mkdirSync(reposDir, { recursive: true });
+      if (writeIfAbsent(guidePath, workspaceGuide())) {
         notes.push(`Wrote ${guidePath} so agents working there find the knowledge base.`);
-      } catch (err) {
-        notes.push(
-          `Could not write ${guidePath}: ${err instanceof Error ? err.message : String(err)}`,
-        );
+      } else {
+        notes.push(`Left your existing ${guidePath} alone.`);
       }
+    } catch (err) {
+      notes.push(
+        `Could not write ${guidePath}: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   }
 
@@ -443,9 +478,7 @@ export function runInit(opts: InitOptions, paths: InitPaths): InitResult {
       process.execPath,
       isProfile ? path.resolve(paths.configPath) : null,
     );
-    const existing = fs.existsSync(paths.clientConfigPath)
-      ? readTextFile(paths.clientConfigPath)
-      : null;
+    const existing = readTextFileIfPresent(paths.clientConfigPath);
     // Merged first: a config that cannot be parsed throws here, before anything is copied
     // or written, and is left exactly as it was.
     const merged = mergeClientConfig(existing, command, args, clientEntry);
@@ -453,11 +486,10 @@ export function runInit(opts: InitOptions, paths: InitPaths): InitResult {
     if (existing !== null) {
       // The first backup is the one worth keeping — the user's config from before this
       // tool ever touched it. A second run must not replace it with its own output.
-      if (fs.existsSync(backup)) {
-        notes.push(`Kept the earlier backup of the Claude Desktop config: ${backup}`);
-      } else {
-        fs.copyFileSync(paths.clientConfigPath, backup);
+      if (copyIfAbsent(paths.clientConfigPath, backup)) {
         notes.push(`Backed up the previous Claude Desktop config to ${backup}`);
+      } else {
+        notes.push(`Kept the earlier backup of the Claude Desktop config: ${backup}`);
       }
     }
     fs.mkdirSync(path.dirname(paths.clientConfigPath), { recursive: true });

@@ -71,6 +71,22 @@ describe('readFileCapped', () => {
     fs.writeFileSync(path.join(dir, 'byte-cap.txt'), byteCapped);
   });
 
+  it('refuses a folder, saying it is one', () => {
+    fs.mkdirSync(path.join(dir, 'sub'), { recursive: true });
+    expect(() => readFileCapped(path.join(dir, 'sub'))).toThrow(/is a directory, not a file/);
+  });
+
+  it('refuses a file over 5 MB and points at search_code', () => {
+    const huge = path.join(dir, 'huge.txt');
+    fs.writeFileSync(huge, Buffer.alloc(5 * 1024 * 1024 + 1, 0x61));
+    expect(() => readFileCapped(huge)).toThrow(/too large to read.*search_code/i);
+  });
+
+  it('reads an empty file as empty text', () => {
+    fs.writeFileSync(path.join(dir, 'empty.txt'), '');
+    expect(readFileCapped(path.join(dir, 'empty.txt'))).toBe('');
+  });
+
   it('reads whole small files without a truncation notice', () => {
     const out = readFileCapped(path.join(dir, 'small.txt'));
     expect(out).toContain('two');

@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { ExpertConfig } from '../config.js';
-import { resolveReal } from '../paths.js';
+import { errorCode, resolveReal } from '../paths.js';
 import { listRepoStatuses, getRepoStatus, portfolioDrift, type RepoStatus } from '../registry.js';
 import { syncRepos, type SyncResult } from './sync.js';
 import type { CurateOne, CurateFailure } from './curate-many.js';
@@ -101,10 +101,6 @@ function isAbandoned(file: string, held: LockRecord | null): boolean {
   } catch {
     return false; // already gone: nothing to judge
   }
-}
-
-function errorCode(err: unknown): unknown {
-  return err instanceof Error && 'code' in err ? err.code : undefined;
 }
 
 /**
