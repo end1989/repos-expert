@@ -86,13 +86,17 @@ interface Trial {
   grades: Grade[];
   costUsd: number;
   model: string;
+  /** Where the trial's repos and documents are, to read or regrade them later. */
+  folder: string;
   error?: string;
 }
 
 async function runTrial(n: number): Promise<Trial> {
-  const cfg = loadConfig(buildFixture());
+  const configPath = buildFixture();
+  const folder = path.dirname(configPath);
+  const cfg = loadConfig(configPath);
   console.error(
-    `trial ${n}: studying orders-api, order-worker and the portfolio with ${cfg.model}…`,
+    `trial ${n}: studying orders-api, order-worker and the portfolio with ${cfg.model} in ${folder}…`,
   );
   let costUsd = 0;
   const citations: CitationReport[] = [];
@@ -110,6 +114,7 @@ async function runTrial(n: number): Promise<Trial> {
       grades: [],
       costUsd,
       model: cfg.model,
+      folder,
       error: err instanceof Error ? err.message : String(err),
     };
   }
@@ -140,9 +145,28 @@ async function runTrial(n: number): Promise<Trial> {
     ],
     costUsd,
     model: cfg.model,
+    folder,
   };
 }
 
+/** What produced the results: the commit, and the agent runtime the curator ran on. */
+function provenance(): { commit: string; dirty: boolean; agentSdk: string } {
+  const git = (...args: string[]) =>
+    execFileSync('git', args, { cwd: ROOT, encoding: 'utf8' }).trim();
+  const sdk = path.join(ROOT, 'node_modules', '@anthropic-ai', 'claude-agent-sdk', 'package.json');
+  const manifest: unknown = JSON.parse(fs.readFileSync(sdk, 'utf8'));
+  const agentSdk =
+    typeof manifest === 'object' &&
+    manifest !== null &&
+    'version' in manifest &&
+    typeof manifest.version === 'string'
+      ? manifest.version
+      : 'unknown';
+  return { commit: git('rev-parse', 'HEAD'), dirty: git('status', '--porcelain') !== '', agentSdk };
+}
+
+// Taken before the trials: it describes the code that ran, whatever is edited meanwhile.
+const ranAt = provenance();
 const results: Trial[] = [];
 for (let n = 1; n <= trials; n++) results.push(await runTrial(n));
 
@@ -171,6 +195,6 @@ console.log(`\n  spent about $${spent.toFixed(2)} (the agent runtime's estimate)
 const outDir = path.join(ROOT, 'evals', 'results');
 fs.mkdirSync(outDir, { recursive: true });
 const report = path.join(outDir, `${new Date().toISOString().replace(/[:.]/g, '-')}.json`);
-fs.writeFileSync(report, JSON.stringify({ trials, results }, null, 2));
+fs.writeFileSync(report, JSON.stringify({ ...ranAt, trials, results }, null, 2));
 console.log(`  report: ${path.relative(ROOT, report)}\n`);
 process.exitCode = failedRequired ? 1 : 0;
