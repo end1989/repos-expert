@@ -156,4 +156,11 @@ describe('couldMatchFolder', () => {
       expect(couldMatchFolder(glob, '.git'), glob).toBe(false);
     }
   });
+
+  it('reads a [class] as any one character, so a class read differently can only widen it', () => {
+    // ripgrep and this matcher have disagreed on classes ("[.-/]"): judged as "?", a class
+    // can make the answer "could", never "could not".
+    expect(couldMatchFolder('.[!g]it', '.git')).toBe(true);
+    expect(couldMatchFolder('*.[jt]s', '.git')).toBe(false);
+  });
 });

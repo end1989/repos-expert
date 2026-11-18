@@ -97,6 +97,21 @@ describe('checkToolCall — what the curator may touch', () => {
     expect(checkToolCall(repo, 'Glob', { pattern: '~/**/*.pem' }).allowed).toBe(false);
   });
 
+  it('judges an absolute Glob pattern by the folder the runtime lists, trimmed as it trims it', () => {
+    // The runtime lists the text before the last separator in front of the first wildcard,
+    // trimmed: "<repo>/.. /*" lists the repository's parent. Names only, but names of
+    // anything beside the repository.
+    const r = repo.replace(/\\/g, '/');
+    for (const gap of [' ', '\t', ' ', '　']) {
+      for (const pattern of [`${r}/..${gap}/*`, `${r}/..${gap}/[s]*/*`, `${r}/..${gap}/x.txt`]) {
+        expect(checkToolCall(repo, 'Glob', { pattern }).allowed, JSON.stringify(pattern)).toBe(
+          false,
+        );
+      }
+    }
+    expect(checkToolCall(repo, 'Glob', { pattern: `${r}/.git\t/**` }).allowed).toBe(false);
+  });
+
   it('accepts an absolute glob that stays inside the repository', () => {
     const inside = `${repo.replace(/\\/g, '/')}/src/**/*.ts`;
     expect(checkToolCall(repo, 'Glob', { pattern: inside })).toEqual({ allowed: true });
@@ -206,6 +221,32 @@ describe('checkToolCall — what the curator may touch', () => {
   it('says why a glob it cannot read is refused', () => {
     const decision = checkToolCall(repo, 'Grep', { pattern: 'url', glob: '{a,{b,c}}' });
     expect(decision.allowed ? '' : decision.reason).toMatch(/Nested/);
+  });
+
+  it('refuses Grep glob syntax that ripgrep and this check could read differently', () => {
+    // The runtime's ripgrep (14.1) drops a } that closes nothing, so ".gi}t" is ".git"; a
+    // [class] holding / is one character to ripgrep ("[.-/]git" is ".git") but is split at
+    // the slash here. An unclosed { or [ means different things in different versions.
+    const ambiguous = [
+      '.gi}t .gi}t/conf?g',
+      '[.-/]git [.-/]git/conf?g',
+      '.gi[t/] .gi[t/]/*',
+      '{src',
+      'src/[ab',
+      '[,]x',
+      '[{]x}',
+    ];
+    for (const glob of ambiguous) {
+      const decision = checkToolCall(repo, 'Grep', { pattern: 'url', glob });
+      expect(decision.allowed, glob).toBe(false);
+      expect(decision.allowed ? '' : decision.reason, glob).toMatch(/read differently/);
+    }
+  });
+
+  it('refuses a Grep glob whose last folder could be any folder, a nested .git included', () => {
+    for (const glob of ['vendor/*/* vendor/*/*/*', 'src/**/*', '{src,vendor}/**', '*a/**']) {
+      expect(checkToolCall(repo, 'Grep', { pattern: 'url', glob }).allowed, glob).toBe(false);
+    }
   });
 
   it('refuses a network path without touching the network', () => {
