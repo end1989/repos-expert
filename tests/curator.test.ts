@@ -36,6 +36,18 @@ const allDocs = [
 const done = (output: string, stats?: RunStats): AgentRun =>
   stats === undefined ? { output } : { output, stats };
 
+/** A link to a file needs a privilege on Windows that a link to a folder (junction) does not. */
+const fileLinksWork = ((): boolean => {
+  const dir = makeTempDir('expert-cur-link-');
+  try {
+    fs.writeFileSync(path.join(dir, 'target'), '');
+    fs.symlinkSync(path.join(dir, 'target'), path.join(dir, 'link'), 'file');
+    return true;
+  } catch {
+    return false;
+  }
+})();
+
 function repoWithOneCommit(cfg: ExpertConfig, name = 'alpha'): string {
   const repo = path.join(cfg.reposDir, name);
   initGitRepo(repo);
@@ -286,6 +298,39 @@ describe('curatePortfolio', () => {
     );
     expect(meta.repos.alpha).toBe(sha);
   });
+
+  it.skipIf(!fileLinksWork)(
+    'leaves unread a manifest that is a link out of the repository',
+    async () => {
+      const cfg = makeCfg(makeTempDir('expert-cur-'));
+      curatedAlpha(cfg);
+      // beta's package.json is a link to a file elsewhere on the machine, which the host
+      // process would otherwise read and hand to the model.
+      const outside = path.join(makeTempDir('expert-cur-outside-'), 'credentials.json');
+      fs.writeFileSync(outside, '{"token":"OUTSIDE-SECRET"}');
+      const beta = path.join(cfg.reposDir, 'beta');
+      initGitRepo(beta);
+      const sha = commitFile(beta, 'a.ts', 'x');
+      fs.symlinkSync(outside, path.join(beta, 'package.json'), 'file');
+      const dir = path.join(cfg.knowledgeDir, 'repos', 'beta');
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'card.md'), 'beta keeps the books');
+      writeMeta(cfg.knowledgeDir, 'beta', {
+        sha,
+        curatedAt: '2026-08-10T00:00:00Z',
+        model: 'claude-sonnet-5',
+        docVersion: DOC_VERSION,
+      });
+      const prompts: string[] = [];
+      await curatePortfolio(cfg, async (prompt) => {
+        prompts.push(prompt);
+        return done('===FILE: portfolio.md===\np\n===FILE: cross-repo-map.md===\nm');
+      });
+      expect(prompts[0]).toContain('beta keeps the books');
+      expect(prompts[0]).toContain('alpha-pkg'); // a manifest inside its repo still goes in
+      expect(prompts[0]).not.toContain('OUTSIDE-SECRET');
+    },
+  );
 
   it('does not pay for a second portfolio run after a final failure', async () => {
     const cfg = makeCfg(makeTempDir('expert-cur-'));

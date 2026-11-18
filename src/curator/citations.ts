@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { isInside } from '../paths.js';
+import { isInside, resolveReal } from '../paths.js';
 import type { BrokenCitation, CitationReport } from '../registry.js';
 
 export type { BrokenCitation, CitationReport };
@@ -48,12 +48,18 @@ function lineCount(file: string): number {
   return body.endsWith('\n') ? lines - 1 : lines;
 }
 
-/** Checks every citation in `docs` against the repository at `root`. */
+/**
+ * Checks every citation in `docs` against the repository at `root`. This runs in the host
+ * process, outside the agent's confinement, so a cited path is judged both as written and
+ * by where it really leads: a link inside the repository that points out of it is outside,
+ * and what it points at is never read.
+ */
 export function checkCitations(
   root: string,
   docs: Readonly<Record<string, string>>,
 ): CitationReport {
-  const realRoot = path.resolve(root);
+  const base = path.resolve(root);
+  const realRoot = resolveReal(base);
   const report: CitationReport = { checked: 0, broken: [] };
   const counts = new Map<string, number>();
 
@@ -62,10 +68,12 @@ export function checkCitations(
     for (const c of findCitations(body)) {
       if (seen.has(c.text)) continue;
       seen.add(c.text);
-      const abs = path.resolve(realRoot, c.file);
       const broken = (reason: string) => report.broken.push({ doc, citation: c.text, reason });
 
-      if (!isInside(realRoot, abs)) {
+      // Contained as written before anything is resolved, then judged by where it lands.
+      const lexical = path.resolve(base, c.file);
+      const abs = isInside(base, lexical) ? resolveReal(lexical) : null;
+      if (abs === null || !isInside(realRoot, abs)) {
         report.checked++;
         broken('outside the repository');
         continue;

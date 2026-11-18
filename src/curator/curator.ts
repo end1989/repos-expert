@@ -3,6 +3,7 @@ import path from 'node:path';
 import type { ExpertConfig } from '../config.js';
 import { curatorEnvFrom } from '../provider.js';
 import { gitLogOneline, gitLogRangeStat, listBranches } from '../git.js';
+import { isInside, resolveReal } from '../paths.js';
 import {
   listRepoStatuses,
   writeMeta,
@@ -133,6 +134,17 @@ export async function curateRepo(
 
 const MANIFEST_FILES = ['package.json', 'pyproject.toml', 'go.mod', 'Cargo.toml', 'pom.xml'];
 
+/**
+ * The start of a manifest at the top of `repo`, if it has one. The host process reads these,
+ * outside the agent's confinement, so a manifest that is a link out of the repository is
+ * left unread: like everything the curator reads, it is judged by where it leads.
+ */
+function readManifest(repo: string, file: string): string | null {
+  const p = path.join(repo, file);
+  if (!fs.existsSync(p) || !isInside(resolveReal(repo), resolveReal(p))) return null;
+  return fs.readFileSync(p, 'utf8').slice(0, 4000);
+}
+
 export async function curatePortfolio(
   cfg: ExpertConfig,
   runner: AgentRunner = runClaudeAgent,
@@ -146,9 +158,8 @@ export async function curatePortfolio(
     if (!fs.existsSync(cardPath)) return false;
     cards[s.name] = fs.readFileSync(cardPath, 'utf8');
     for (const mf of MANIFEST_FILES) {
-      const p = path.join(s.path, mf);
-      if (fs.existsSync(p))
-        manifests[`${s.name}/${mf}`] = fs.readFileSync(p, 'utf8').slice(0, 4000);
+      const manifest = readManifest(s.path, mf);
+      if (manifest !== null) manifests[`${s.name}/${mf}`] = manifest;
     }
     return true;
   });

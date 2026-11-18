@@ -74,6 +74,30 @@ describe('checkCitations', () => {
     expect(report.broken[0]?.reason).toBe('outside the repository');
   });
 
+  it('judges a citation by where a link in the repository leads, not where it sits', () => {
+    // src/vendor links to a folder elsewhere on the machine. Reading through it would reach
+    // a file the curator itself is never allowed to open.
+    const outside = makeTempDir('expert-cite-outside-');
+    fs.writeFileSync(path.join(outside, 'secret.js'), 'one\ntwo\n');
+    const linked = makeTempDir('expert-cite-linked-');
+    fs.mkdirSync(path.join(linked, 'src'));
+    // 'junction' needs no privilege on Windows and is an ordinary symlink elsewhere.
+    fs.symlinkSync(outside, path.join(linked, 'src', 'vendor'), 'junction');
+    const report = checkCitations(linked, { 'map.md': 'see src/vendor/secret.js:1' });
+    expect(report.broken).toEqual([
+      { doc: 'map.md', citation: 'src/vendor/secret.js:1', reason: 'outside the repository' },
+    ]);
+  });
+
+  it('still checks a repository that is itself reached through a link', () => {
+    const viaLink = path.join(makeTempDir('expert-cite-via-'), 'repo');
+    fs.symlinkSync(repo, viaLink, 'junction');
+    expect(checkCitations(viaLink, { 'interfaces.md': 'src/server.js:5' })).toEqual({
+      checked: 1,
+      broken: [],
+    });
+  });
+
   it('leaves alone a bare name.ext:N it cannot resolve, which may be a host and port', () => {
     // "api.example.com:443" looks like a file citation; without a folder in it and with no
     // such file, it is more likely a host than a hallucinated file. Not checked, not broken.
