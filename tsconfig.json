@@ -1,14 +1,25 @@
 {
+  // Type-checks everything — source, tests and config — without emitting. `npm run build`
+  // uses tsconfig.build.json, which compiles src/ alone into dist/.
+  //
+  // exactOptionalPropertyTypes is left off on purpose: values parsed by zod, commander and
+  // the MCP SDK arrive as `T | undefined` and are passed on as optional properties (seven
+  // places, among them the SDK's documented `sessionIdGenerator: undefined`).
   "compilerOptions": {
     "target": "ES2022",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
-    "outDir": "dist",
-    "rootDir": "src",
     "strict": true,
-    "esModuleInterop": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitReturns": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "verbatimModuleSyntax": true,
     "skipLibCheck": true,
-    "types": ["node"]
+    "types": ["node"],
+    "noEmit": true
   },
-  "include": ["src"]
+  "include": ["src", "tests", "evals", "vitest.config.ts"]
 }

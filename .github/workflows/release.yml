@@ -15,8 +15,8 @@ on:
     tags: ['v*']
 
 permissions:
-  contents: write   # create the GitHub Release
-  id-token: write   # OIDC token for npm trusted publishing + provenance
+  contents: write # create the GitHub Release
+  id-token: write # OIDC token for npm trusted publishing + provenance
 
 jobs:
   publish:

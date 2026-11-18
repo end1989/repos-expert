@@ -21,3 +21,6 @@ dist/
 
 # Eval reports (npm run eval)
 evals/results/
+
+# Coverage reports (npm run test:coverage)
+coverage/

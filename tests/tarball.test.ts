@@ -26,7 +26,13 @@ const ALLOWED: RegExp[] = [
 ];
 
 /** Files that must be present or the package does not work / is not honest. */
-const REQUIRED = ['package.json', 'dist/cli/index.js', 'dist/mcp/server.js', 'README.md', 'LICENSE'];
+const REQUIRED = [
+  'package.json',
+  'dist/cli/index.js',
+  'dist/mcp/server.js',
+  'README.md',
+  'LICENSE',
+];
 
 /** Anything matching these is a leak of the author's environment, full stop. */
 const FORBIDDEN: RegExp[] = [
@@ -62,21 +68,23 @@ interface PackEntry {
 
 /**
  * `npm pack --json` printed an array of packages through npm 11 and an object keyed by
- * package name from npm 12. Accept both — the release workflow installs npm@latest, CI
- * uses whatever Node bundles, and this guard must not depend on which one ran it.
+ * package name from npm 12. Accept both — CI and the release job use whichever npm their
+ * Node version bundles, and this guard must not depend on which one ran it.
  */
 export function firstPackedEntry(parsed: unknown): PackEntry {
   const candidate = Array.isArray(parsed)
     ? (parsed[0] as unknown)
     : parsed !== null && typeof parsed === 'object'
-      ? (Object.values(parsed as Record<string, unknown>)[0] as unknown)
+      ? Object.values(parsed)[0]
       : undefined;
   if (
     candidate === null ||
     typeof candidate !== 'object' ||
     !Array.isArray((candidate as { files?: unknown }).files)
   ) {
-    throw new Error(`npm pack --json returned no packages (got ${JSON.stringify(parsed).slice(0, 120)})`);
+    throw new Error(
+      `npm pack --json returned no packages (got ${JSON.stringify(parsed).slice(0, 120)})`,
+    );
   }
   return candidate as PackEntry;
 }
@@ -84,12 +92,16 @@ export function firstPackedEntry(parsed: unknown): PackEntry {
 function packedPaths(): string[] {
   const cli = npmCli();
   if (cli === null) throw new Error('could not locate npm-cli.js to run `npm pack --dry-run`');
-  const out = execFileSync(process.execPath, [cli, 'pack', '--dry-run', '--json', '--ignore-scripts'], {
-    cwd: PKG_ROOT,
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'ignore'],
-    maxBuffer: 16 * 1024 * 1024,
-  });
+  const out = execFileSync(
+    process.execPath,
+    [cli, 'pack', '--dry-run', '--json', '--ignore-scripts'],
+    {
+      cwd: PKG_ROOT,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      maxBuffer: 16 * 1024 * 1024,
+    },
+  );
   return firstPackedEntry(JSON.parse(out)).files.map((f) => f.path.replace(/\\/g, '/'));
 }
 
@@ -128,6 +140,8 @@ describe('published tarball', () => {
 
   it('contains everything the package needs to run and to be honest about itself', () => {
     const missing = REQUIRED.filter((r) => !paths.includes(r));
-    expect(missing, `missing from tarball (run \`npm run build\`?): ${missing.join(', ')}`).toEqual([]);
+    expect(missing, `missing from tarball (run \`npm run build\`?): ${missing.join(', ')}`).toEqual(
+      [],
+    );
   });
 });

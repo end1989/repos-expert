@@ -12,13 +12,13 @@ updates:
     # CI still tests; its major bumps wait until the engines floor moves.
     ignore:
       - dependency-name: vitest
-        update-types: ["version-update:semver-major"]
+        update-types: ['version-update:semver-major']
     groups:
       minor-and-patch:
         update-types: [minor, patch]
     labels: [dependencies]
     commit-message:
-      prefix: "chore(deps)"
+      prefix: 'chore(deps)'
 
   # The workflows themselves (actions/checkout, actions/setup-node).
   - package-ecosystem: github-actions
@@ -28,4 +28,4 @@ updates:
       day: monday
     labels: [dependencies, ci]
     commit-message:
-      prefix: "ci"
+      prefix: 'ci'
