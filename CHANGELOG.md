@@ -20,8 +20,31 @@ patch bumps are fixes and additive changes). Dates are npm publish dates (UTC).
   too. The hook judges each path as the runtime will use it (trimmed; on Windows, a Git
   Bash path such as `/c/…` read as `C:\…`), refuses a `~` path, which the runtime would
   expand to the home folder, refuses a network path before resolving it, refuses a Grep
-  glob such as `*` that would bring `.git` back into a search, and in the portfolio pass
-  refuses repos the config excludes. Each refusal is unit-tested (`tests/confine.test.ts`).
+  glob that would let ripgrep into a `.git` folder at any depth (`*`, `{.git,x}`, and
+  `vendor/**`, which opens `vendor/lib/.git`), and in the portfolio pass refuses repos the
+  config excludes. A Grep glob is judged in the pieces the runtime hands ripgrep, `{…}`
+  words whole. Syntax that ripgrep could read differently from the hook is refused: a
+  backslash, which ripgrep reads as an escape; a `}` that closes nothing, which the
+  runtime's ripgrep drops (`.gi}t` is `.git` to it); a `[class]` holding `/`. An absolute
+  Glob pattern is judged by the folder the runtime lists, the text before its first
+  wildcard trimmed as the runtime trims it, so `<repo>/.. /*` cannot list the repository's
+  parent. Each refusal is unit-tested (`tests/confine.test.ts`). The Grep-glob rule is also
+  tested against ripgrep itself, over every pairing of a few dozen globs that try to reopen
+  `.git`: against this project's ripgrep, and against the one inside the runtime, which
+  reads some globs differently (`tests/confine-ripgrep.test.ts`,
+  `tests/runtime/grep-globs.test.ts`).
+- **Text from a studied repository cannot attach files to the curator's prompt.** The
+  prompt carries commit subjects, branch names, earlier documents and manifests, and the
+  runtime read an `@path` in it (`fix @~/.ssh/id_rsa` in a commit subject) as a file to
+  attach before the first turn, a read no PreToolUse hook sees. The session now sets the
+  Agent SDK's `verbatimPrompts`, so the prompt reaches the model as written.
+  `npm run test:runtime` runs the runtime the SDK bundles against a fake Messages API on
+  127.0.0.1 (no tokens, no network) and fails if anything from outside the repository, or
+  from `.git`, reaches the model, or if the studied repository's own `CLAUDE.md`, hooks,
+  MCP servers or skills are loaded. A control session with those protections switched off
+  shows each planted attack is live. CI runs it on Linux, macOS and Windows. The Agent SDK
+  is pinned to an exact version, and Dependabot proposes each new one on its own, so that
+  test meets every runtime before it ships.
 - **`expert mcp --http`: a malformed request no longer crashes the server.** A request for
   `//` raised an unhandled rejection before the token check — an unauthenticated crash
   under Node's defaults. It is now a 400. Binding to `--host ::1` crashed on every request;
@@ -74,6 +97,9 @@ patch bumps are fixes and additive changes). Dates are npm publish dates (UTC).
   starts with `-`, as `repos.txt` parsing already did.
 - Dependencies updated: `npm audit --omit=dev` reports nothing (it reported nine, one
   critical). The MCP SDK floor is 1.32.2; 1.30.0 has a published advisory.
+  `@anthropic-ai/sdk` is 1.8: its license is now Apache-2.0, and it brings
+  `@opentelemetry/api` (Apache-2.0, no dependencies). Nothing loads it at run time: it is
+  there for the Agent SDK's types, and the runtime carries its own client.
 
 ### Fixed
 

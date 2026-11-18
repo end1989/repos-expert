@@ -10,6 +10,7 @@ for changing it — for people and coding agents alike.
     npm run check          # typecheck (src + tests) → lint → format check → build → test
     npm test               # builds, then runs the suite (no network, no model calls)
     npm run test:coverage  # the same, with coverage and thresholds
+    npm run test:runtime   # the real Claude Code runtime vs a fake API (no tokens, no network)
     npm run format         # apply Prettier
     npm run eval           # SPENDS MODEL TOKENS — the real curator on the fixture, graded
 
@@ -25,8 +26,8 @@ for changing it — for people and coding agents alike.
   Diagnostics go to stderr.
 - **The curator can only read, and only its repository.** Its session options live in
   `src/curator/agent.ts` and its path confinement in `src/curator/confine.ts`; both are
-  tested. Never widen its tools, set a bypass permission mode, or load settings or MCP
-  servers into it.
+  tested, and `npm run test:runtime` checks them against the real runtime. Never widen its
+  tools, set a bypass permission mode, or load settings or MCP servers into it.
 - **Every subprocess takes an argument array** (`execFile`, or `spawn` where output must
   stream). No shell strings and no `shell: true`, ever. Repo names are validated against
   `/^[A-Za-z0-9._-]+$/` (`isValidRepoName`) before they reach a path or a command line.
@@ -63,6 +64,8 @@ for changing it — for people and coding agents alike.
   `testConfig` in `tests/helpers.ts`; tests are type-checked, so a missing field fails `tsc`.
 - **What ships** — `tests/tarball.test.ts` packs the package for real and fails on anything
   outside its `ALLOWED` list; extend it deliberately.
+- **The Agent SDK version** — it is pinned exactly: it bundles the runtime whose path and
+  glob handling the hook mirrors. `npm run test:runtime` (CI's runtime job) must pass on it.
 - **The curator's behaviour** — `curateConcurrency` above 2–4 has triggered throttling, and
   a throttled repo that hits `curateTimeoutMinutes` is reported, not retried.
 
