@@ -29,7 +29,9 @@ for changing it — for people and coding agents alike.
   tested, and `npm run test:runtime` checks them against the real runtime. Never widen its
   tools, set a bypass permission mode, or load settings or MCP servers into it.
 - **Every subprocess takes an argument array** (`execFile`, or `spawn` where output must
-  stream). No shell strings and no `shell: true`, ever. Repo names are validated against
+  stream), and a full path from `findOnPath` (`src/which.ts`), never a bare name: on
+  Windows a bare name is looked for in the working folder first, and git's working folder
+  is a studied repository. No shell strings and no `shell: true`, ever. Repo names are validated against
   `/^[A-Za-z0-9._-]+$/` (`isValidRepoName`) before they reach a path or a command line.
 - **`repos.txt` URLs go through a transport allowlist** (https, http, ssh, git, file,
   `user@host:path`). git's `ext::` transport runs a shell command.

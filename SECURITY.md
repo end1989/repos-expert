@@ -95,7 +95,11 @@ Breaking any of these is a vulnerability we want to hear about.
    are absent from every tool, whatever the case of the name, however many there are.
    Paths over 4,096 characters are refused before they are resolved.
 4. **Every subprocess is started from an argument array, never through a shell**
-   (`execFile` and `spawn`; nothing sets `shell: true`). Queries and URLs are passed after
+   (`execFile` and `spawn`; nothing sets `shell: true`), **and by its full path**, found
+   only in the absolute folders on PATH (`src/which.ts`). Started by bare name, a program is
+   looked for on Windows in the working folder first, and a relative PATH entry is read
+   against the working folder anywhere; git runs inside the repositories being studied, so
+   a `git.exe` committed to one would run in git's place. Queries and URLs are passed after
    `--`, and a clone URL that starts with `-` is refused outright. git is told not to ask
    for credentials (`GIT_TERMINAL_PROMPT=0`, `GCM_INTERACTIVE=never`) and a network
    operation stops after 30 minutes; ssh's own questions — a key passphrase, an unknown

@@ -1,47 +1,33 @@
-import { execFileSync, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { parseClaudeAuthOutput, type ClaudeAuth } from '../provider.js';
+import { findOnPath } from '../which.js';
 
 /**
  * What `doctor` asks of the machine. Each answers without opening a shell and without
  * throwing: a probe that cannot tell returns "no" or null, and the check says so.
  */
 
-const FINDER = process.platform === 'win32' ? 'where' : 'which';
-
 /**
  * Is a command installed? Looked up rather than executed — running `claude --version`
  * would need a shell on Windows, where it is a .cmd shim, and this tool does not open one.
+ * Looked up in-process, and only in absolute PATH folders: where.exe also searches the
+ * folder doctor is started from (see which.ts).
  */
 export function onPath(cmd: string): boolean {
-  if (!/^[A-Za-z0-9._-]+$/.test(cmd)) return false;
-  try {
-    execFileSync(FINDER, [cmd], { stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
-  }
+  return findOnPath(cmd) !== null;
 }
 
 /**
  * Asks Claude Code whether it is signed in (`claude auth status`, JSON). The executable is
- * located with where/which and run directly; an npm `.cmd` shim on Windows is run through
- * the package's cli.js with node instead of through cmd.exe. Null whenever the answer
- * cannot be trusted.
+ * found on PATH and run directly; an npm `.cmd` shim on Windows is run through the
+ * package's cli.js with node instead of through cmd.exe. Null whenever the answer cannot be
+ * trusted.
  */
 export function claudeAuthStatus(): ClaudeAuth | null {
-  let found: string;
-  try {
-    found =
-      execFileSync(FINDER, ['claude'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
-        .split(/\r?\n/)
-        .map((s) => s.trim())
-        .find((s) => s.length > 0) ?? '';
-  } catch {
-    return null;
-  }
-  if (found.length === 0) return null;
+  const found = findOnPath('claude');
+  if (found === null) return null;
 
   let file = found;
   let args = ['auth', 'status'];

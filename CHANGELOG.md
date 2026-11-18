@@ -9,6 +9,17 @@ patch bumps are fixes and additive changes). Dates are npm publish dates (UTC).
 
 ### Security
 
+- **A program in a studied repository no longer runs in git's place (Windows).** git was
+  started by bare name with a repository as its working folder, and Windows looks for a
+  program named that way in the working folder before PATH. A `git.exe` committed at a
+  repository's root therefore ran as the user whenever expert asked git anything: `sync`,
+  `status`, `curate`, `refresh`, and the MCP server's `list_repos`, which an AI client calls
+  on its own. Its output also went into the curator's prompt. git and gh are now found in
+  the absolute folders on PATH and started by their full path (relative PATH entries are
+  skipped too, on every platform). `doctor` finds programs the same way instead of with
+  where.exe, which also searches the working folder. Claude Code's own shell sets
+  `NoDefaultCurrentDirectoryInExePath`, which hides this; a terminal, Task Scheduler or
+  an MCP client may not set it.
 - **The curator is now read-only in fact, and confined to the repository it studies.** It
   passed `allowedTools: ['Read', 'Glob', 'Grep']` with `permissionMode: 'bypassPermissions'`,
   which pre-approves those three but restricts nothing: the session also had Bash, Write,
