@@ -112,6 +112,22 @@ describe('checkToolCall — what the curator may touch', () => {
     expect(checkToolCall(repo, 'Glob', { pattern: `${r}/.git\t/**` }).allowed).toBe(false);
   });
 
+  it.runIf(process.platform !== 'win32')(
+    'cuts an absolute Glob pattern only where this platform separates folders, as the runtime does',
+    () => {
+      // Off Windows a backslash is part of a name: the runtime lists the repository's parent
+      // with the glob "<repo>\-*/**", which ripgrep reads as "<repo>-*/**" — the siblings.
+      const pattern = `${repo}\\-*/**`;
+      expect(checkToolCall(repo, 'Glob', { pattern }).allowed, pattern).toBe(false);
+    },
+  );
+
+  it('tells the model to write a Grep glob from the search folder, not from the root', () => {
+    const decision = checkToolCall(repo, 'Grep', { pattern: 'x', glob: '/src/*.ts' });
+    expect(decision.allowed).toBe(false);
+    expect(decision.allowed ? '' : decision.reason).toMatch(/relative to the search folder/);
+  });
+
   it('accepts an absolute glob that stays inside the repository', () => {
     const inside = `${repo.replace(/\\/g, '/')}/src/**/*.ts`;
     expect(checkToolCall(repo, 'Glob', { pattern: inside })).toEqual({ allowed: true });

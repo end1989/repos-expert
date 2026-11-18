@@ -221,7 +221,9 @@ function absoluteGlobFolder(pattern: string): string | null {
   if (!path.isAbsolute(pattern)) return null;
   const wildcard = pattern.search(GLOB_MAGIC);
   if (wildcard === -1) return path.dirname(pattern);
-  const cut = Math.max(pattern.lastIndexOf('/', wildcard), pattern.lastIndexOf('\\', wildcard));
+  // Where the runtime cuts: at "/" or this platform's separator. Off Windows a backslash is
+  // part of a name, so cutting there would judge a deeper folder than the runtime lists.
+  const cut = Math.max(pattern.lastIndexOf('/', wildcard), pattern.lastIndexOf(path.sep, wildcard));
   const folder = cut <= 0 ? path.parse(pattern).root : pattern.slice(0, cut);
   // "C:" alone is the current folder on drive C; the pattern meant the drive's root.
   return /^[A-Za-z]:$/.test(folder) ? `${folder}${path.sep}` : folder;
@@ -258,7 +260,13 @@ function globProblem(
   const folder = absoluteGlobFolder(glob);
   if (folder === null) return null;
   const located = locate(repoRoot, realRoot, folder, excluded);
-  if ('problem' in located) return `the pattern "${given}" lists a folder: ${located.problem}`;
+  if ('problem' in located) {
+    // A Grep glob only filters what is under the search folder, so the fix is to write it
+    // from there.
+    return tool === 'Grep'
+      ? `the pattern "${given}" is written from the root: write a Grep glob relative to the search folder (such as "src/*.ts") and give that folder as the path`
+      : `the pattern "${given}" lists a folder: ${located.problem}`;
+  }
   if (excluded.size > 0 && path.relative(realRoot, located.real) === '') {
     return `the pattern "${given}" covers a repository that is excluded from study`;
   }
