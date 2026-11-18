@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { z } from 'zod';
 import { loadConfig, type ExpertConfig } from '../config.js';
 import { curatorEnvFrom, describeProvider, type ClaudeAuth, type EnvLike } from '../provider.js';
 import { readReposList } from '../repos-list.js';
@@ -48,12 +49,30 @@ function entryConfigArg(args: string[]): string | null {
   return i >= 0 && i + 1 < args.length ? (args[i + 1] ?? null) : null;
 }
 
+function normalizedPath(p: string): string {
+  return path.resolve(p).replace(/\\/g, '/').toLowerCase();
+}
+
 function samePath(a: string, b: string): boolean {
-  const norm = (p: string) => path.resolve(p).replace(/\\/g, '/').toLowerCase();
-  return norm(a) === norm(b);
+  return normalizedPath(a) === normalizedPath(b);
 }
 
 const PACKAGE_NAME = 'repos-expert';
+
+const PackageJson = z.looseObject({
+  name: z.unknown().optional(),
+  version: z.unknown().optional(),
+});
+
+/** The MCP server entries of a Claude Desktop config; anything else in the file is ignored. */
+const ClientConfig = z.looseObject({
+  mcpServers: z
+    .record(
+      z.string(),
+      z.looseObject({ command: z.unknown().optional(), args: z.unknown().optional() }),
+    )
+    .optional(),
+});
 
 /** Version of the package that owns `file`, found by walking up to its package.json. */
 function installedVersionAbove(file: string): string | null {
@@ -62,8 +81,10 @@ function installedVersionAbove(file: string): string | null {
     const pkg = path.join(dir, 'package.json');
     if (fs.existsSync(pkg)) {
       try {
-        const parsed = JSON.parse(fs.readFileSync(pkg, 'utf8')) as { name?: unknown; version?: unknown };
-        if (parsed.name === PACKAGE_NAME && typeof parsed.version === 'string') return parsed.version;
+        const parsed = PackageJson.safeParse(JSON.parse(fs.readFileSync(pkg, 'utf8')));
+        if (!parsed.success) return null;
+        const { name, version } = parsed.data;
+        if (name === PACKAGE_NAME && typeof version === 'string') return version;
       } catch {
         return null;
       }
@@ -86,11 +107,18 @@ export function clientLaunchCheck(probes: Probes): Check | null {
   const name = 'claude desktop';
 
   if (client.text === null) {
-    return { name, status: 'warn', detail: `no config at ${client.path} — the server is not connected yet`, fix: 'expert init' };
+    return {
+      name,
+      status: 'warn',
+      detail: `no config at ${client.path} — the server is not connected yet`,
+      fix: 'expert init',
+    };
   }
-  let parsed: { mcpServers?: Record<string, { command?: unknown; args?: unknown }> };
+  let parsed: z.infer<typeof ClientConfig>;
   try {
-    parsed = JSON.parse(client.text) as typeof parsed;
+    const result = ClientConfig.safeParse(JSON.parse(client.text));
+    if (!result.success) throw new Error('unexpected shape');
+    parsed = result.data;
   } catch {
     return {
       name,
@@ -104,17 +132,30 @@ export function clientLaunchCheck(probes: Probes): Check | null {
   // entries with no --config; a named profile owns the one whose --config is its file.
   const servers = parsed.mcpServers ?? {};
   const ours = Object.entries(servers).filter(([key, e]) => {
-    const argv = Array.isArray(e.args) ? e.args.filter((a): a is string => typeof a === 'string') : [];
-    return key === PACKAGE_NAME || key.startsWith(`${PACKAGE_NAME}-`) || argv.some((a) => a.includes(PACKAGE_NAME));
+    const argv = Array.isArray(e.args)
+      ? e.args.filter((a): a is string => typeof a === 'string')
+      : [];
+    return (
+      key === PACKAGE_NAME ||
+      key.startsWith(`${PACKAGE_NAME}-`) ||
+      argv.some((a) => a.includes(PACKAGE_NAME))
+    );
   });
   const match = ours.find(([, e]) => {
-    const argv = Array.isArray(e.args) ? e.args.filter((a): a is string => typeof a === 'string') : [];
+    const argv = Array.isArray(e.args)
+      ? e.args.filter((a): a is string => typeof a === 'string')
+      : [];
     const cfgArg = entryConfigArg(argv);
-    return probes.profileConfig === null ? cfgArg === null : cfgArg !== null && samePath(cfgArg, probes.profileConfig);
+    return probes.profileConfig === null
+      ? cfgArg === null
+      : cfgArg !== null && samePath(cfgArg, probes.profileConfig);
   });
   if (match === undefined || typeof match[1].command !== 'string') {
     const others = ours.map(([key]) => key);
-    const initCmd = probes.profileConfig === null ? 'expert init' : `expert init --config "${probes.profileConfig}"`;
+    const initCmd =
+      probes.profileConfig === null
+        ? 'expert init'
+        : `expert init --config "${probes.profileConfig}"`;
     return {
       name,
       status: 'warn',
@@ -126,7 +167,9 @@ export function clientLaunchCheck(probes: Probes): Check | null {
     };
   }
   const [entryKey, entry] = match;
-  const args = Array.isArray(entry.args) ? entry.args.filter((a): a is string => typeof a === 'string') : [];
+  const args = Array.isArray(entry.args)
+    ? entry.args.filter((a): a is string => typeof a === 'string')
+    : [];
   const command: string = typeof entry.command === 'string' ? entry.command : '';
   const exe = path.basename(command).toLowerCase();
   const as = entryKey === PACKAGE_NAME ? '' : ` as "${entryKey}"`;
@@ -137,7 +180,11 @@ export function clientLaunchCheck(probes: Probes): Check | null {
       return { name, status: 'ok', detail: `custom launch: ${command} ${args.join(' ')}` };
     }
     if (spec.includes('@')) {
-      return { name, status: 'ok', detail: `via npx ${spec} — the newest published version, resolved at each launch (needs network)` };
+      return {
+        name,
+        status: 'ok',
+        detail: `via npx ${spec} — the newest published version, resolved at each launch (needs network)`,
+      };
     }
     return {
       name,
@@ -183,10 +230,15 @@ export function clientLaunchCheck(probes: Probes): Check | null {
   return { name, status: 'ok', detail: `launches this install (${launched})${as} — ${script}` };
 }
 
-const MIN_NODE_MAJOR = 20;
+/** The oldest Node this runs on — set by a dependency (commander 15), and by package.json engines. */
+const MIN_NODE: readonly [number, number] = [22, 12];
 
-function majorOf(version: string): number {
-  return Number.parseInt(version.replace(/^v/, '').split('.')[0] ?? '0', 10);
+function supportsNode(version: string): boolean {
+  const [major = 0, minor = 0] = version
+    .replace(/^v/, '')
+    .split('.')
+    .map((n) => Number.parseInt(n, 10));
+  return major > MIN_NODE[0] || (major === MIN_NODE[0] && minor >= MIN_NODE[1]);
 }
 
 function countProjects(reposDir: string): number {
@@ -203,8 +255,10 @@ function countCurated(knowledgeDir: string): number {
   try {
     return fs
       .readdirSync(path.join(knowledgeDir, 'repos'), { withFileTypes: true })
-      .filter((e) => e.isDirectory() && fs.existsSync(path.join(knowledgeDir, 'repos', e.name, 'meta.json')))
-      .length;
+      .filter(
+        (e) =>
+          e.isDirectory() && fs.existsSync(path.join(knowledgeDir, 'repos', e.name, 'meta.json')),
+      ).length;
   } catch {
     return 0;
   }
@@ -222,6 +276,11 @@ function canWrite(dir: string): boolean {
   }
 }
 
+/** An environment switch that is unset or explicitly off. */
+function off(v: string | undefined): boolean {
+  return v === undefined || v.length === 0 || v === '0' || v.toLowerCase() === 'false';
+}
+
 /**
  * Which model would write the documents, and who pays. `curatorEnv` is included
  * because that is exactly the setting a scheduled run relies on and a shell session
@@ -233,8 +292,6 @@ function modelAccessCheck(probes: Probes, cfg: ExpertConfig | undefined): Check 
   // Only ask Claude Code about sign-in when its answer would matter: an API key, a
   // custom endpoint or a cloud provider outranks it, and without the executable there
   // is nothing to ask.
-  const off = (v: string | undefined): boolean =>
-    v === undefined || v.length === 0 || v === '0' || v.toLowerCase() === 'false';
   const askAuth =
     hasClaudeCode &&
     off(env.CLAUDE_CODE_USE_BEDROCK) &&
@@ -271,15 +328,15 @@ function modelAccessCheck(probes: Probes, cfg: ExpertConfig | undefined): Check 
 export function runChecks(configPath: string | null, probes: Probes): Check[] {
   const checks: Check[] = [];
 
-  const major = majorOf(probes.nodeVersion);
+  const floor = `${MIN_NODE[0]}.${MIN_NODE[1]}`;
   checks.push(
-    major >= MIN_NODE_MAJOR
+    supportsNode(probes.nodeVersion)
       ? { name: 'node', status: 'ok', detail: probes.nodeVersion }
       : {
           name: 'node',
           status: 'fail',
-          detail: `${probes.nodeVersion} — this needs ${MIN_NODE_MAJOR} or newer`,
-          fix: 'Install Node 20 or newer: winget install OpenJS.NodeJS.LTS (Windows), brew install node (macOS), or nodejs.org',
+          detail: `${probes.nodeVersion} — this needs ${floor} or newer`,
+          fix: `Install Node ${floor} or newer (an LTS release): winget install OpenJS.NodeJS.LTS (Windows), brew install node (macOS), or nodejs.org`,
         },
   );
 

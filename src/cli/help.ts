@@ -1,3 +1,7 @@
+import { findConfigPath, loadConfig, userConfigPath } from '../config.js';
+import { listRepoStatuses } from '../registry.js';
+import { readReposList } from '../repos-list.js';
+
 /**
  * `expert help` — an orientation, not a flag list. Commander already prints the flags;
  * what someone stuck actually needs is where their files are, what state they are in,
@@ -15,6 +19,43 @@ export interface HelpState {
   githubUser: string | null;
 }
 
+/** Never throws: help is what you reach for when things are broken. */
+export async function gatherHelpState(version: string): Promise<HelpState> {
+  const state: HelpState = {
+    version,
+    configPath: null,
+    reposDir: null,
+    reposListFile: null,
+    listedCount: 0,
+    repoCount: 0,
+    curatedCount: 0,
+    githubUser: null,
+  };
+  let cfg;
+  try {
+    cfg = loadConfig();
+  } catch {
+    return state;
+  }
+  state.configPath = findConfigPath() ?? userConfigPath();
+  state.reposDir = cfg.reposDir;
+  state.reposListFile = cfg.reposListFile;
+  state.githubUser = cfg.githubUser;
+  try {
+    state.listedCount = readReposList(cfg.reposListFile).entries.length;
+  } catch {
+    // an unreadable list should not take the help text down
+  }
+  try {
+    const statuses = await listRepoStatuses(cfg);
+    state.repoCount = statuses.length;
+    state.curatedCount = statuses.filter((s) => s.state !== 'uncurated').length;
+  } catch {
+    // likewise a missing folder
+  }
+  return state;
+}
+
 function plural(n: number, word: string): string {
   return `${n} ${word}${n === 1 ? '' : 's'}`;
 }
@@ -27,10 +68,7 @@ function nextStep(s: HelpState): string[] {
     ];
   }
   if (s.repoCount === 0 && s.listedCount > 0) {
-    return [
-      '  expert sync',
-      `     ${plural(s.listedCount, 'project')} listed but not cloned yet.`,
-    ];
+    return ['  expert sync', `     ${plural(s.listedCount, 'project')} listed but not cloned yet.`];
   }
   if (s.repoCount === 0) {
     return [
@@ -87,6 +125,7 @@ export function helpText(s: HelpState): string {
     '  expert status                What is in the folder, and what has been studied',
     '  expert sync                  Clone/update everything listed (and GitHub, if set)',
     '  expert refresh [names...]    Study what changed, or the projects you name',
+    '  expert refresh --dry-run     What a refresh would study, and cost, without doing it',
     '  expert curate --stale        Study everything not yet studied (slow, uses the model)',
     '  expert mcp                   Run the MCP server (your AI client does this for you)',
     '',

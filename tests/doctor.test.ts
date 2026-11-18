@@ -6,7 +6,7 @@ import { makeTempDir } from './helpers.js';
 
 function probes(over: Partial<Probes> = {}): Probes {
   return {
-    nodeVersion: 'v22.0.0',
+    nodeVersion: 'v24.11.1',
     ripgrepPath: 'C:/rg.exe',
     hasCommand: () => true,
     env: {},
@@ -20,14 +20,18 @@ function probes(over: Partial<Probes> = {}): Probes {
 
 function find(checks: Check[], name: string): Check {
   const c = checks.find((x) => x.name === name);
-  if (c === undefined) throw new Error(`no check named ${name}: ${checks.map((x) => x.name).join(', ')}`);
+  if (c === undefined)
+    throw new Error(`no check named ${name}: ${checks.map((x) => x.name).join(', ')}`);
   return c;
 }
 
 function goodConfig(root: string): string {
   const configPath = path.join(root, 'expert.config.json');
   fs.mkdirSync(path.join(root, 'repos', 'a-project', '.git'), { recursive: true });
-  fs.writeFileSync(configPath, JSON.stringify({ reposDir: './repos', knowledgeDir: './knowledge' }));
+  fs.writeFileSync(
+    configPath,
+    JSON.stringify({ reposDir: './repos', knowledgeDir: './knowledge' }),
+  );
   return configPath;
 }
 
@@ -90,6 +94,19 @@ describe('runChecks', () => {
     ).toBe('fail');
   });
 
+  it.each([
+    ['v20.18.0', 'fail'],
+    ['v22.11.0', 'fail'],
+    ['v22.12.0', 'ok'],
+    ['v24.11.1', 'ok'],
+    ['v26.0.0', 'ok'],
+  ])('holds Node %s to the floor a dependency sets (22.12): %s', (nodeVersion, expected) => {
+    const root = makeTempDir('expert-doctor-');
+    expect(find(runChecks(goodConfig(root), probes({ nodeVersion })), 'node').status).toBe(
+      expected,
+    );
+  });
+
   it('warns when neither Claude Code nor an API key is available', () => {
     const root = makeTempDir('expert-doctor-');
     const checks = runChecks(goodConfig(root), probes({ hasCommand: () => false }));
@@ -119,14 +136,25 @@ describe('runChecks', () => {
 
   it('says signed in when the auth probe confirms it', () => {
     const root = makeTempDir('expert-doctor-');
-    const c = find(runChecks(goodConfig(root), probes({ claudeAuth: () => ({ loggedIn: true, authMethod: 'claude.ai', subscriptionType: 'pro' }) })), 'model access');
+    const c = find(
+      runChecks(
+        goodConfig(root),
+        probes({
+          claudeAuth: () => ({ loggedIn: true, authMethod: 'claude.ai', subscriptionType: 'pro' }),
+        }),
+      ),
+      'model access',
+    );
     expect(c.status).toBe('ok');
     expect(c.detail).toMatch(/signed in/i);
   });
 
   it('warns, with the sign-in command, when Claude Code is installed but signed out', () => {
     const root = makeTempDir('expert-doctor-');
-    const c = find(runChecks(goodConfig(root), probes({ claudeAuth: () => ({ loggedIn: false }) })), 'model access');
+    const c = find(
+      runChecks(goodConfig(root), probes({ claudeAuth: () => ({ loggedIn: false }) })),
+      'model access',
+    );
     expect(c.status).toBe('warn');
     expect(c.fix).toBe('claude auth login');
   });
@@ -174,7 +202,10 @@ describe('claude desktop launch check', () => {
   function fakeInstall(root: string, version: string): string {
     const pkg = path.join(root, 'node_modules', 'repos-expert');
     fs.mkdirSync(path.join(pkg, 'dist', 'cli'), { recursive: true });
-    fs.writeFileSync(path.join(pkg, 'package.json'), JSON.stringify({ name: 'repos-expert', version }));
+    fs.writeFileSync(
+      path.join(pkg, 'package.json'),
+      JSON.stringify({ name: 'repos-expert', version }),
+    );
     fs.writeFileSync(path.join(pkg, 'dist', 'cli', 'index.js'), '');
     return path.join(pkg, 'dist', 'cli', 'index.js');
   }
@@ -188,19 +219,29 @@ describe('claude desktop launch check', () => {
 
   it('is silent on platforms without Claude Desktop', () => {
     const root = makeTempDir('expert-doctor-');
-    expect(runChecks(goodConfig(root), probes({ clientConfig: null })).some((c) => c.name === 'claude desktop')).toBe(false);
+    expect(
+      runChecks(goodConfig(root), probes({ clientConfig: null })).some(
+        (c) => c.name === 'claude desktop',
+      ),
+    ).toBe(false);
   });
 
   it('warns when Claude Desktop has no config file yet', () => {
     const root = makeTempDir('expert-doctor-');
-    const c = find(runChecks(goodConfig(root), probes({ clientConfig: { path: 'C:/fake/x.json', text: null } })), 'claude desktop');
+    const c = find(
+      runChecks(goodConfig(root), probes({ clientConfig: { path: 'C:/fake/x.json', text: null } })),
+      'claude desktop',
+    );
     expect(c.status).toBe('warn');
     expect(c.fix).toBe('expert init');
   });
 
   it('warns when the server is not registered', () => {
     const root = makeTempDir('expert-doctor-');
-    const cfg = { path: 'C:/fake/x.json', text: JSON.stringify({ mcpServers: { other: { command: 'x' } } }) };
+    const cfg = {
+      path: 'C:/fake/x.json',
+      text: JSON.stringify({ mcpServers: { other: { command: 'x' } } }),
+    };
     const c = find(runChecks(goodConfig(root), probes({ clientConfig: cfg })), 'claude desktop');
     expect(c.status).toBe('warn');
     expect(c.detail).toMatch(/not registered/);
@@ -209,7 +250,13 @@ describe('claude desktop launch check', () => {
 
   it('warns on a client config that is not JSON, and does not throw', () => {
     const root = makeTempDir('expert-doctor-');
-    const c = find(runChecks(goodConfig(root), probes({ clientConfig: { path: 'C:/fake/x.json', text: '{ nope' } })), 'claude desktop');
+    const c = find(
+      runChecks(
+        goodConfig(root),
+        probes({ clientConfig: { path: 'C:/fake/x.json', text: '{ nope' } }),
+      ),
+      'claude desktop',
+    );
     expect(c.status).toBe('warn');
     expect(c.detail).toMatch(/not valid JSON/);
   });
@@ -218,7 +265,13 @@ describe('claude desktop launch check', () => {
     const root = makeTempDir('expert-doctor-');
     const entry = fakeInstall(root, '1.2.3');
     const c = find(
-      runChecks(goodConfig(root), probes({ version: '1.2.3', clientConfig: clientConfig({ command: NODE, args: [entry, 'mcp'] }) })),
+      runChecks(
+        goodConfig(root),
+        probes({
+          version: '1.2.3',
+          clientConfig: clientConfig({ command: NODE, args: [entry, 'mcp'] }),
+        }),
+      ),
       'claude desktop',
     );
     expect(c.status).toBe('ok');
@@ -229,7 +282,13 @@ describe('claude desktop launch check', () => {
     const root = makeTempDir('expert-doctor-');
     const entry = fakeInstall(root, '0.9.0');
     const c = find(
-      runChecks(goodConfig(root), probes({ version: '1.2.3', clientConfig: clientConfig({ command: NODE, args: [entry, 'mcp'] }) })),
+      runChecks(
+        goodConfig(root),
+        probes({
+          version: '1.2.3',
+          clientConfig: clientConfig({ command: NODE, args: [entry, 'mcp'] }),
+        }),
+      ),
       'claude desktop',
     );
     expect(c.status).toBe('warn');
@@ -242,7 +301,10 @@ describe('claude desktop launch check', () => {
     const root = makeTempDir('expert-doctor-');
     const gone = path.join(root, 'node_modules', 'repos-expert', 'dist', 'cli', 'index.js');
     const c = find(
-      runChecks(goodConfig(root), probes({ clientConfig: clientConfig({ command: NODE, args: [gone, 'mcp'] }) })),
+      runChecks(
+        goodConfig(root),
+        probes({ clientConfig: clientConfig({ command: NODE, args: [gone, 'mcp'] }) }),
+      ),
       'claude desktop',
     );
     expect(c.status).toBe('fail');
@@ -253,7 +315,12 @@ describe('claude desktop launch check', () => {
   it('warns on a bare npx launch — it runs whichever copy npm finds first', () => {
     const root = makeTempDir('expert-doctor-');
     const c = find(
-      runChecks(goodConfig(root), probes({ clientConfig: clientConfig({ command: 'npx', args: ['-y', 'repos-expert', 'mcp'] }) })),
+      runChecks(
+        goodConfig(root),
+        probes({
+          clientConfig: clientConfig({ command: 'npx', args: ['-y', 'repos-expert', 'mcp'] }),
+        }),
+      ),
       'claude desktop',
     );
     expect(c.status).toBe('warn');
@@ -264,7 +331,15 @@ describe('claude desktop launch check', () => {
   it('accepts an npx @latest launch as deliberate', () => {
     const root = makeTempDir('expert-doctor-');
     const c = find(
-      runChecks(goodConfig(root), probes({ clientConfig: clientConfig({ command: 'npx', args: ['-y', 'repos-expert@latest', 'mcp'] }) })),
+      runChecks(
+        goodConfig(root),
+        probes({
+          clientConfig: clientConfig({
+            command: 'npx',
+            args: ['-y', 'repos-expert@latest', 'mcp'],
+          }),
+        }),
+      ),
       'claude desktop',
     );
     expect(c.status).toBe('ok');
@@ -274,7 +349,10 @@ describe('claude desktop launch check', () => {
   it('does not judge a custom launch command', () => {
     const root = makeTempDir('expert-doctor-');
     const c = find(
-      runChecks(goodConfig(root), probes({ clientConfig: clientConfig({ command: 'docker', args: ['run', 'me'] }) })),
+      runChecks(
+        goodConfig(root),
+        probes({ clientConfig: clientConfig({ command: 'docker', args: ['run', 'me'] }) }),
+      ),
       'claude desktop',
     );
     expect(c.status).toBe('ok');
@@ -298,7 +376,10 @@ describe('claude desktop launch check — profiles', () => {
   function fakeInstall(root: string, version: string): string {
     const pkg = path.join(root, 'node_modules', 'repos-expert');
     fs.mkdirSync(path.join(pkg, 'dist', 'cli'), { recursive: true });
-    fs.writeFileSync(path.join(pkg, 'package.json'), JSON.stringify({ name: 'repos-expert', version }));
+    fs.writeFileSync(
+      path.join(pkg, 'package.json'),
+      JSON.stringify({ name: 'repos-expert', version }),
+    );
     fs.writeFileSync(path.join(pkg, 'dist', 'cli', 'index.js'), '');
     return path.join(pkg, 'dist', 'cli', 'index.js');
   }
@@ -306,7 +387,16 @@ describe('claude desktop launch check — profiles', () => {
   it('for the default profile, judges the entry without --config', () => {
     const root = makeTempDir('expert-doctor-');
     const entry = fakeInstall(root, '1.2.3');
-    const c = find(runChecks(goodConfig(root), probes({ clientConfig: twoProfiles(entry, 'C:/work/expert.config.json'), profileConfig: null })), 'claude desktop');
+    const c = find(
+      runChecks(
+        goodConfig(root),
+        probes({
+          clientConfig: twoProfiles(entry, 'C:/work/expert.config.json'),
+          profileConfig: null,
+        }),
+      ),
+      'claude desktop',
+    );
     expect(c.status).toBe('ok');
     expect(c.detail).toMatch(/launches this install/);
   });
@@ -315,7 +405,13 @@ describe('claude desktop launch check — profiles', () => {
     const root = makeTempDir('expert-doctor-');
     const entry = fakeInstall(root, '1.2.3');
     const work = path.join(root, 'work', 'expert.config.json');
-    const c = find(runChecks(goodConfig(root), probes({ clientConfig: twoProfiles(entry, work), profileConfig: work })), 'claude desktop');
+    const c = find(
+      runChecks(
+        goodConfig(root),
+        probes({ clientConfig: twoProfiles(entry, work), profileConfig: work }),
+      ),
+      'claude desktop',
+    );
     expect(c.status).toBe('ok');
     expect(c.detail).toContain('repos-expert-work');
   });
@@ -324,7 +420,16 @@ describe('claude desktop launch check — profiles', () => {
     const root = makeTempDir('expert-doctor-');
     const entry = fakeInstall(root, '1.2.3');
     const other = path.join(root, 'other', 'expert.config.json');
-    const c = find(runChecks(goodConfig(root), probes({ clientConfig: twoProfiles(entry, 'C:/work/expert.config.json'), profileConfig: other })), 'claude desktop');
+    const c = find(
+      runChecks(
+        goodConfig(root),
+        probes({
+          clientConfig: twoProfiles(entry, 'C:/work/expert.config.json'),
+          profileConfig: other,
+        }),
+      ),
+      'claude desktop',
+    );
     expect(c.status).toBe('warn');
     expect(c.detail).toMatch(/not registered/);
     expect(c.detail).toContain('repos-expert-work');

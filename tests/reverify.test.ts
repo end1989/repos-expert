@@ -24,7 +24,8 @@ function makeCfg(root: string, refreshIgnore?: string[]): ExpertConfig {
     curateConcurrency: 2,
     curateTimeoutMinutes: 25,
     curatorEnv: {},
-    refreshIgnore: refreshIgnore ?? DEFAULT_REFRESH_IGNORE,
+    curateMaxBudgetUsd: null,
+    refreshIgnore: [...(refreshIgnore ?? DEFAULT_REFRESH_IGNORE)],
   };
 }
 
@@ -38,9 +39,41 @@ const stale = (name: string): RepoStatus => ({
   state: 'stale',
 });
 
+describe('the default ignore list', () => {
+  it('passes over licences, notices and changelogs in every usual spelling', () => {
+    const prose = [
+      'LICENSE',
+      'LICENSE.md',
+      'LICENCE.txt',
+      'NOTICE',
+      'CHANGELOG.md',
+      'CONTRIBUTING.md',
+      'SECURITY.md',
+      'sub/CODE_OF_CONDUCT.md',
+    ];
+    expect(isTrivialChange(prose, DEFAULT_REFRESH_IGNORE)).toBe(true);
+  });
+
+  it('never mistakes a source file for one just because of how its name starts', () => {
+    for (const code of [
+      'SECURITY_scanner.py',
+      'LICENSE_check.ts',
+      'NOTICEBOARD.js',
+      'CHANGELOG_parser.rs',
+    ]) {
+      expect(isTrivialChange([code], DEFAULT_REFRESH_IGNORE), code).toBe(false);
+    }
+  });
+});
+
 describe('isTrivialChange', () => {
   it('is true when every changed path is ignorable, and for no changes at all', () => {
-    expect(isTrivialChange(['README.md', 'docs/x.md', '.github/workflows/ci.yml'], DEFAULT_REFRESH_IGNORE)).toBe(true);
+    expect(
+      isTrivialChange(
+        ['README.md', 'docs/x.md', '.github/workflows/ci.yml'],
+        DEFAULT_REFRESH_IGNORE,
+      ),
+    ).toBe(true);
     expect(isTrivialChange([], DEFAULT_REFRESH_IGNORE)).toBe(true);
   });
 
@@ -59,7 +92,12 @@ describe('partitionStale', () => {
     const root = makeTempDir('expert-reverify-');
     const cfg = makeCfg(root);
     for (const n of ['docsonly', 'codechange', 'unknownhistory', 'nochange']) {
-      writeMeta(cfg.knowledgeDir, n, { sha: 'b'.repeat(40), curatedAt: '2026-08-10T00:00:00Z', model: 'm', docVersion: 1 });
+      writeMeta(cfg.knowledgeDir, n, {
+        sha: 'b'.repeat(40),
+        curatedAt: '2026-08-10T00:00:00Z',
+        model: 'm',
+        docVersion: 1,
+      });
     }
     const changed: Record<string, string[] | null> = {
       docsonly: ['README.md', 'CHANGELOG.md'],
@@ -67,9 +105,13 @@ describe('partitionStale', () => {
       unknownhistory: null,
       nochange: [],
     };
-    const res = await partitionStale(cfg, ['docsonly', 'codechange', 'unknownhistory', 'nochange'].map(stale), {
-      changedFiles: async (s) => changed[s.name] ?? null,
-    });
+    const res = await partitionStale(
+      cfg,
+      ['docsonly', 'codechange', 'unknownhistory', 'nochange'].map(stale),
+      {
+        changedFiles: async (s) => changed[s.name] ?? null,
+      },
+    );
     expect(res.reverified).toEqual(['docsonly', 'nochange']);
     expect(res.curate.map((s) => s.name)).toEqual(['codechange', 'unknownhistory']);
     expect(readMeta(cfg.knowledgeDir, 'docsonly')?.verifiedSha).toBe('a'.repeat(40));
@@ -80,7 +122,12 @@ describe('partitionStale', () => {
   it('never re-verifies uncurated repos and leaves fresh ones alone', async () => {
     const root = makeTempDir('expert-reverify-');
     const cfg = makeCfg(root);
-    const uncurated: RepoStatus = { ...stale('newone'), curatedSha: null, curatedAt: null, state: 'uncurated' };
+    const uncurated: RepoStatus = {
+      ...stale('newone'),
+      curatedSha: null,
+      curatedAt: null,
+      state: 'uncurated',
+    };
     const fresh: RepoStatus = { ...stale('ok'), curatedSha: 'a'.repeat(40), state: 'fresh' };
     const res = await partitionStale(cfg, [uncurated, fresh], { changedFiles: async () => [] });
     expect(res.reverified).toEqual([]);

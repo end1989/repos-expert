@@ -8,6 +8,7 @@ const status = (name: string, state: RepoStatus['state']): RepoStatus => ({
   currentSha: 'abcdef1234567890',
   curatedSha: state === 'uncurated' ? null : 'fedcba0987654321',
   curatedAt: state === 'uncurated' ? null : '2026-08-10T00:00:00Z',
+  verifiedThrough: null,
   state,
 });
 
@@ -36,6 +37,14 @@ describe('formatStatus', () => {
     expect(out.split('\n')).toHaveLength(1);
   });
 
+  it('names the folders it skipped and why, so nothing vanishes without a word', () => {
+    const out = formatStatus([status('alpha', 'fresh')], undefined, [
+      { name: 'scratch', reason: 'no commits yet' },
+    ]);
+    expect(out).toContain('skipped    scratch');
+    expect(out).toContain('no commits yet');
+  });
+
   it('points at refresh when docs have fallen behind the code', () => {
     const out = formatStatus([status('alpha', 'fresh'), status('beta', 'stale')]);
     expect(out).toMatch(/expert refresh\b/);
@@ -55,6 +64,8 @@ describe('formatStatus — verified freshness', () => {
         state: 'fresh',
       },
     ]);
-    expect(out).toMatch(/fresh\s+r\s+head bbbbbbb\s+curated aaaaaaa\s+\(code unchanged through bbbbbbb\)/);
+    expect(out).toMatch(
+      /fresh\s+r\s+head bbbbbbb\s+curated aaaaaaa\s+\(code unchanged through bbbbbbb\)/,
+    );
   });
 });

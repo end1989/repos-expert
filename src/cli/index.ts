@@ -1,35 +1,35 @@
 #!/usr/bin/env node
-import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
-import { createRequire } from 'node:module';
 import path from 'node:path';
 import readline from 'node:readline/promises';
 import { fileURLToPath } from 'node:url';
 import { Command } from 'commander';
 import { rgPath } from '@vscode/ripgrep';
 import { formatDiagnosis, runChecks } from './doctor.js';
-import { parseClaudeAuthOutput, type ClaudeAuth } from '../provider.js';
-import {
-  estimateBatch,
-  formatDryRun,
-  formatEstimate,
-  needsConfirmation,
-} from './estimate.js';
+import { estimateBatch, formatDryRun, formatEstimate, needsConfirmation } from './estimate.js';
 import { findConfigPath, loadConfig, parseConcurrency, userConfigPath } from '../config.js';
-import { addToReposList, readReposList } from '../repos-list.js';
-import { helpText, type HelpState } from './help.js';
+import { readTextFile } from '../paths.js';
+import { addToReposList } from '../repos-list.js';
+import { gatherHelpState, helpText } from './help.js';
 import { claudeDesktopConfigPath, runInit, suggestReposDir } from './init.js';
+import { claudeAuthStatus, onPath } from './probes.js';
+import { describeCitations, describeRun, oneLineError } from './messages.js';
 import { syncRepos } from './sync.js';
 import { formatStatus } from './status.js';
-import { listRepoStatuses, getRepoStatus } from '../registry.js';
+import { listRepoStatuses, getRepoStatus, scanRepos } from '../registry.js';
 import { startMcpOrExplain } from '../mcp/server.js';
-// The curator (and with it the Claude Agent SDK) is imported lazily inside `curate` and
-// `refresh`: `expert mcp` runs in every client session and must not load what it never uses.
+import { VERSION } from '../version.js';
+// The curator (and with it the Claude Agent SDK) is imported lazily, only where it is
+// about to spend: `expert mcp` runs in every client session and must not load what it never uses.
+
+/**
+ * Command wiring: options in, a call into a module, output and exit code out. Anything
+ * with a decision in it lives in the module the command calls.
+ */
 
 const program = new Command();
 
-// Read the real version rather than a literal that silently drifts from package.json.
-const { version } = createRequire(import.meta.url)('../../package.json') as { version: string };
+const version = VERSION;
 
 program
   .name('expert')
@@ -47,12 +47,23 @@ program
  */
 let profileConfig: string | null = null;
 program.hook('preAction', () => {
-  const opt = (program.opts() as { config?: string }).config;
+  const opt = program.opts<{ config?: string }>().config;
   if (opt !== undefined && opt.length > 0) {
     profileConfig = path.resolve(opt);
     process.env.EXPERT_CONFIG = profileConfig;
   }
 });
+
+/** Asks a yes/no question when someone is at the terminal; anything but yes is no. */
+async function confirm(question: string): Promise<boolean> {
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    const answer = (await rl.question(question)).trim().toLowerCase();
+    return answer === 'y' || answer === 'yes';
+  } finally {
+    rl.close();
+  }
+}
 
 program
   .command('init')
@@ -62,59 +73,70 @@ program
   .option('--force', 'overwrite an existing config')
   .option('--skip-client', 'do not touch the Claude Desktop config')
   .option('--skip-workspace-guide', 'do not write CLAUDE.md into your repos folder')
-  .option('--name <label>', 'with --config: label for this collection (client entry becomes repos-expert-<label>)')
+  .option(
+    '--name <label>',
+    'with --config: label for this collection (client entry becomes repos-expert-<label>)',
+  )
   .option('-y, --yes', 'accept the default repos folder without asking')
-  .action(async (opts: {
-    reposDir?: string;
-    githubUser?: string;
-    force?: boolean;
-    skipClient?: boolean;
-    skipWorkspaceGuide?: boolean;
-    name?: string;
-    yes?: boolean;
-  }) => {
-    // Guessing the folder is what leaves people staring at an empty one, so ask
-    // whenever there is someone there to answer.
-    const suggestion = suggestReposDir();
-    if (opts.reposDir === undefined && opts.yes !== true && process.stdin.isTTY === true) {
-      const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-      try {
-        const answer = (await rl.question(`Where are your projects? [${suggestion}] `)).trim();
-        opts.reposDir = answer.length > 0 ? answer : suggestion;
-      } finally {
-        rl.close();
+  .action(
+    async (opts: {
+      reposDir?: string;
+      githubUser?: string;
+      force?: boolean;
+      skipClient?: boolean;
+      skipWorkspaceGuide?: boolean;
+      name?: string;
+      yes?: boolean;
+    }) => {
+      const configPath = profileConfig ?? userConfigPath();
+      // Only a new config needs a folder. An existing one already names it, and init reports
+      // that — a guess here would draw a spurious "re-run with --force", and with --force
+      // would quietly move the collection.
+      if (opts.reposDir === undefined && !fs.existsSync(configPath)) {
+        // Guessing the folder is what leaves people staring at an empty one, so ask
+        // whenever there is someone there to answer.
+        const suggestion = suggestReposDir();
+        if (opts.yes !== true && process.stdin.isTTY) {
+          const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+          try {
+            const answer = (await rl.question(`Where are your projects? [${suggestion}] `)).trim();
+            opts.reposDir = answer.length > 0 ? answer : suggestion;
+          } finally {
+            rl.close();
+          }
+        } else {
+          opts.reposDir = suggestion;
+        }
       }
-    } else if (opts.reposDir === undefined) {
-      opts.reposDir = suggestion;
-    }
 
-    const res = runInit(opts, {
-      configPath: profileConfig ?? userConfigPath(),
-      defaultConfigPath: userConfigPath(),
-      clientConfigPath: claudeDesktopConfigPath(),
-      entryPoint: fileURLToPath(import.meta.url),
-    });
-    console.log(
-      res.configWritten ? `Wrote config: ${res.configPath}` : `Config: ${res.configPath}`,
-    );
-    console.log(`Projects folder: ${res.reposDir}`);
-    if (res.clientWritten) console.log(`Connected to Claude Desktop: ${res.clientConfigPath}`);
-    for (const note of res.notes) console.log(`  ${note}`);
+      const res = runInit(opts, {
+        configPath,
+        defaultConfigPath: userConfigPath(),
+        clientConfigPath: claudeDesktopConfigPath(),
+        entryPoint: fileURLToPath(import.meta.url),
+      });
+      console.log(
+        res.configWritten ? `Wrote config: ${res.configPath}` : `Config: ${res.configPath}`,
+      );
+      console.log(`Projects folder: ${res.reposDir}`);
+      if (res.clientWritten) console.log(`Connected to Claude Desktop: ${res.clientConfigPath}`);
+      for (const note of res.notes) console.log(`  ${note}`);
 
-    const listPath = res.reposListPath ?? path.join(res.reposDir, 'repos.txt');
-    console.log('\nNext — get your projects in the folder, either way works:');
-    console.log(`  a. Copy or clone project folders into ${res.reposDir}`);
-    console.log(`  b. Add their git URLs to ${listPath}, then run \`expert sync\``);
-    console.log(`     (or skip the editor: \`expert add <url>\` does both)`);
-    console.log('\nThen:');
-    console.log('  expert status                  # see what it found');
-    console.log('  expert refresh <project>       # study one, check the result');
-    console.log('  Restart Claude Desktop and ask "What projects do I have?"');
-    if (!res.configWritten) {
-      console.log(`\nWrong folder? Edit "reposDir" in ${res.configPath}, or re-run with`);
-      console.log(`  expert init --repos-dir "<path>" --force`);
-    }
-  });
+      const listPath = res.reposListPath ?? path.join(res.reposDir, 'repos.txt');
+      console.log('\nNext — get your projects in the folder, either way works:');
+      console.log(`  a. Copy or clone project folders into ${res.reposDir}`);
+      console.log(`  b. Add their git URLs to ${listPath}, then run \`expert sync\``);
+      console.log(`     (or skip the editor: \`expert add <url>\` does both)`);
+      console.log('\nThen:');
+      console.log('  expert status                  # see what it found');
+      console.log('  expert refresh <project>       # study one, check the result');
+      console.log('  Restart Claude Desktop and ask "What projects do I have?"');
+      if (!res.configWritten) {
+        console.log(`\nWrong folder? Edit "reposDir" in ${res.configPath}, or re-run with`);
+        console.log(`  expert init --repos-dir "<path>" --force`);
+      }
+    },
+  );
 
 program
   .command('add')
@@ -131,7 +153,11 @@ program
     if (res.problems.length > 0) process.exitCode = 1;
 
     if (opts.sync !== false && res.added.length > 0) {
-      const sync = await syncRepos(cfg, undefined, res.added.map((e) => e.name));
+      const sync = await syncRepos(
+        cfg,
+        undefined,
+        res.added.map((e) => e.name),
+      );
       console.log(`cloned ${sync.synced.length}, failed ${sync.failed.length}`);
       for (const f of sync.failed) console.error(`  FAILED ${f.name}: ${oneLineError(f.error)}`);
       if (sync.failed.length > 0) process.exitCode = 1;
@@ -140,107 +166,6 @@ program
       }
     }
   });
-
-/**
- * git's failure text is a transcript — "Cloning into…", "remote: …", "fatal: …" — and the
- * only line worth a summary is the last fatal/error one. Keep the whole thing out of a
- * one-line report; the user asked what failed, not for the log.
- */
-function oneLineError(message: string): string {
-  const lines = message.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.length > 0);
-  const decisive = [...lines].reverse().find((l) => /^(fatal|error):/i.test(l));
-  return (decisive ?? lines[0] ?? message).replace(/^(fatal|error):\s*/i, '');
-}
-/**
- * Is a command installed? Looked up rather than executed — running `claude --version`
- * would need a shell on Windows, where it is a .cmd shim, and this file does not get
- * to be the one place that opens a shell.
- */
-function onPath(cmd: string): boolean {
-  if (!/^[A-Za-z0-9._-]+$/.test(cmd)) return false;
-  const finder = process.platform === 'win32' ? 'where' : 'which';
-  try {
-    execFileSync(finder, [cmd], { stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Asks Claude Code whether it is signed in (`claude auth status`, JSON). Never throws
- * and never opens a shell: the executable is located with where/which and run directly;
- * an npm `.cmd` shim on Windows is run through the package's cli.js with node instead
- * of through cmd.exe. Returns null whenever the answer cannot be trusted.
- */
-function claudeAuthStatus(): ClaudeAuth | null {
-  const finder = process.platform === 'win32' ? 'where' : 'which';
-  let found: string;
-  try {
-    found =
-      execFileSync(finder, ['claude'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
-        .split(/\r?\n/)
-        .map((s) => s.trim())
-        .find((s) => s.length > 0) ?? '';
-  } catch {
-    return null;
-  }
-  if (found.length === 0) return null;
-
-  let file = found;
-  let args = ['auth', 'status'];
-  if (/\.(cmd|bat)$/i.test(found)) {
-    const cli = path.join(path.dirname(found), 'node_modules', '@anthropic-ai', 'claude-code', 'cli.js');
-    if (!fs.existsSync(cli)) return null;
-    file = process.execPath;
-    args = [cli, 'auth', 'status'];
-  } else if (/\.ps1$/i.test(found)) {
-    return null;
-  }
-  // spawnSync, not execFileSync: `claude auth status` exits 1 when signed out but still
-  // prints the JSON — an exception here would throw away exactly the answer we want.
-  const res = spawnSync(file, args, {
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'ignore'],
-    timeout: 10_000,
-    env: { ...process.env, NO_COLOR: '1' },
-  });
-  if (res.error !== undefined) return null;
-  return parseClaudeAuthOutput(res.stdout ?? '');
-}
-
-/** Never throws: help is what you reach for when things are broken. */
-async function currentHelpState(): Promise<HelpState> {
-  const state: HelpState = {
-    version,
-    configPath: null,
-    reposDir: null,
-    reposListFile: null,
-    listedCount: 0,
-    repoCount: 0,
-    curatedCount: 0,
-    githubUser: null,
-  };
-  let cfg;
-  try {
-    cfg = loadConfig();
-  } catch {
-    return state;
-  }
-  state.configPath = findConfigPath() ?? userConfigPath();
-  state.reposDir = cfg.reposDir;
-  state.reposListFile = cfg.reposListFile;
-  state.githubUser = cfg.githubUser;
-  try {
-    state.listedCount = readReposList(cfg.reposListFile).entries.length;
-  } catch { /* an unreadable list should not take the help text down */ }
-  try {
-    const statuses = await listRepoStatuses(cfg);
-    state.repoCount = statuses.length;
-    state.curatedCount = statuses.filter((s) => s.state !== 'uncurated').length;
-  } catch { /* likewise a missing folder */ }
-  return state;
-}
 
 program
   .command('help', { isDefault: true })
@@ -257,16 +182,24 @@ program
       cmd.outputHelp();
       return;
     }
-    console.log(helpText(await currentHelpState()));
+    console.log(helpText(await gatherHelpState(version)));
   });
 
 program
   .command('sync')
-  .description('Pull repos from GitHub into your repos folder (optional — you can copy them in instead)')
+  .description(
+    'Clone or update everything in repos.txt, and GitHub if configured (optional — copying folders in works too)',
+  )
   .action(async () => {
     const cfg = loadConfig();
     const res = await syncRepos(cfg);
-    console.log(`synced ${res.synced.length}, skipped ${res.skipped.length}, failed ${res.failed.length}`);
+    if (res.nothingToSync !== undefined) {
+      console.log(res.nothingToSync);
+      return;
+    }
+    console.log(
+      `synced ${res.synced.length}, skipped ${res.skipped.length}, failed ${res.failed.length}`,
+    );
     for (const f of res.failed) console.error(`  FAILED ${f.name}: ${oneLineError(f.error)}`);
     if (res.failed.length > 0) process.exitCode = 1;
   });
@@ -274,7 +207,8 @@ program
 program
   .command('doctor')
   .description('Check the setup and say what to fix — run this when something is not working')
-  .action(() => {
+  .option('--json', 'print the checks as JSON')
+  .action((opts: { json?: boolean }) => {
     const clientPath = claudeDesktopConfigPath();
     const checks = runChecks(findConfigPath(), {
       nodeVersion: process.version,
@@ -287,27 +221,48 @@ program
       clientConfig:
         clientPath === null
           ? null
-          : { path: clientPath, text: fs.existsSync(clientPath) ? fs.readFileSync(clientPath, 'utf8') : null },
+          : {
+              path: clientPath,
+              text: fs.existsSync(clientPath) ? readTextFile(clientPath) : null,
+            },
     });
-    console.log(formatDiagnosis(checks));
+    console.log(opts.json === true ? JSON.stringify({ checks }, null, 2) : formatDiagnosis(checks));
     if (checks.some((c) => c.status === 'fail')) process.exitCode = 1;
   });
 
 program
   .command('status')
   .description('Show what was found in your repos folder and what has been studied')
-  .action(async () => {
+  .option('--json', 'print the repos and skipped folders as JSON')
+  .action(async (opts: { json?: boolean }) => {
     const cfg = loadConfig();
-    console.log(formatStatus(await listRepoStatuses(cfg), cfg));
+    const { statuses, skipped } = await scanRepos(cfg);
+    console.log(
+      opts.json === true
+        ? JSON.stringify({ repos: statuses, skipped }, null, 2)
+        : formatStatus(statuses, cfg, skipped),
+    );
   });
 
 program
   .command('mcp')
-  .description('Start the MCP server on stdio (for Claude Desktop, Claude Code, Copilot, or any MCP client)')
-  .option('--http', 'serve over Streamable HTTP instead of stdio (for clients that only speak HTTP)')
-  .option('--host <host>', 'address to bind with --http (default 127.0.0.1 — loopback only)', '127.0.0.1')
-  .option('--port <n>', 'port for --http', (v: string) => Number.parseInt(v, 10), 7411)
-  .option('--token <token>', 'bearer token clients must send with --http (default: EXPERT_HTTP_TOKEN, else generated and printed once)')
+  .description(
+    'Start the MCP server on stdio (for Claude Desktop, Claude Code, Copilot, or any MCP client)',
+  )
+  .option(
+    '--http',
+    'serve over Streamable HTTP instead of stdio (for clients that only speak HTTP)',
+  )
+  .option(
+    '--host <host>',
+    'address to bind with --http (default 127.0.0.1 — loopback only)',
+    '127.0.0.1',
+  )
+  .option('--port <n>', 'port for --http', (v: string) => Number(v), 7411)
+  .option(
+    '--token <token>',
+    'bearer token clients must send with --http (default: EXPERT_HTTP_TOKEN, else generated and printed once)',
+  )
   .action(async (opts: { http?: boolean; host: string; port: number; token?: string }) => {
     if (opts.http !== true) {
       await startMcpOrExplain(() => loadConfig());
@@ -321,8 +276,9 @@ program
       return;
     }
     const fromEnv = process.env.EXPERT_HTTP_TOKEN;
-    const generated = opts.token === undefined && (fromEnv === undefined || fromEnv.length === 0);
-    const token = opts.token ?? (generated ? generateToken() : (fromEnv as string));
+    const token =
+      opts.token ?? (fromEnv !== undefined && fromEnv.length > 0 ? fromEnv : generateToken());
+    const generated = opts.token === undefined && token !== fromEnv;
 
     // Setup mode over HTTP too: a reachable server that explains beats a dead port.
     let makeServer: () => ReturnType<typeof createServer>;
@@ -387,12 +343,16 @@ program
     // A named repo always takes this path, even alongside --all/--stale (commander accepts
     // the combination, and a real run then curates the repo and the portfolio).
     // The batch forms handle --dry-run below, after working out what is stale.
-    if (opts.dryRun === true && (repoArg !== undefined || (opts.portfolio && !opts.all && !opts.stale))) {
+    if (
+      opts.dryRun === true &&
+      (repoArg !== undefined ||
+        (opts.portfolio === true && opts.all !== true && opts.stale !== true))
+    ) {
       if (repoArg !== undefined) {
         await getRepoStatus(cfg, repoArg); // an unknown or invalid name fails here, as it would for real
         console.log(formatDryRun([repoArg], estimateBatch(1, 1)));
       }
-      if (opts.portfolio || opts.all || opts.stale) {
+      if (opts.portfolio === true || opts.all === true || opts.stale === true) {
         console.log(
           'The portfolio pass would rewrite portfolio.md and cross-repo-map.md.\n' +
             'Dry run — nothing was studied and nothing was spent. Drop --dry-run to go ahead.',
@@ -400,97 +360,164 @@ program
       }
       return;
     }
-    // The curator (and with it the Agent SDK) is imported only where it is about to be used,
-    // so a batch dry run stays as model-free as the single-repo one above.
-    let failures = 0;
-
-    if (repoArg !== undefined) {
-      const { curateRepo } = await import('../curator/curator.js');
-      await curateRepo(cfg, await getRepoStatus(cfg, repoArg));
-      console.log(`curated ${repoArg}`);
-    } else if (opts.all || opts.stale) {
-      const statuses = await listRepoStatuses(cfg);
-      if (statuses.length === 0) {
-        // Not "everything is fresh": there is nothing here at all, which is a setup problem.
-        console.error(
-          fs.existsSync(cfg.reposDir)
-            ? `No git repositories found in ${cfg.reposDir}.`
-            : `The repos folder does not exist yet: ${cfg.reposDir}.`,
-        );
-        process.exitCode = 1;
-        return;
-      }
-      let targets = opts.stale ? statuses.filter((s) => s.state !== 'fresh') : statuses;
-      if (opts.stale) {
-        // Stale only in docs/CI/lockfiles → re-verified for free, not studied again.
-        const { partitionStale } = await import('./reverify.js');
-        const split = await partitionStale(cfg, targets, undefined, opts.dryRun === true ? 'dry-run' : 'apply');
-        targets = split.curate;
-        if (split.reverified.length > 0) {
-          console.log(
-            `${split.reverified.length} unchanged in code since last studied — ${
-              opts.dryRun === true ? 'would be re-verified' : 're-verified'
-            } without the model: ${split.reverified.join(', ')}`,
-          );
-        }
-      }
-      const concurrency = opts.concurrency ?? cfg.curateConcurrency;
-      if (opts.dryRun === true) {
-        console.log(
-          targets.length === 0
-            ? 'Nothing to curate — everything is fresh.'
-            : formatDryRun(targets.map((t) => t.name), estimateBatch(targets.length, concurrency)),
-        );
-        return;
-      }
-      if (targets.length === 0) {
-        console.log('Nothing to curate — everything is fresh.');
-      } else {
-        console.log(formatEstimate(estimateBatch(targets.length, concurrency), targets.length));
-        if (opts.yes !== true && needsConfirmation(targets.length, process.stdin.isTTY === true)) {
-          const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-          const answer = (await rl.question('\nStart? [y/N] ')).trim().toLowerCase();
-          rl.close();
-          if (answer !== 'y' && answer !== 'yes') {
-            console.log('Stopped. Nothing was studied, nothing was spent.');
-            return;
-          }
-        }
-        console.log(`\ncurating ${targets.length} repos, ${concurrency} at a time`);
-      }
-      const { curateMany } = await import('./curate-many.js');
-      failures += (await curateMany(cfg, targets, undefined, concurrency)).length;
-    } else if (!opts.portfolio) {
+    if (
+      repoArg === undefined &&
+      opts.all !== true &&
+      opts.stale !== true &&
+      opts.portfolio !== true
+    ) {
       console.error('Specify a repo, --all, --stale, or --portfolio.');
       process.exitCode = 1;
       return;
     }
 
-    if (opts.all || opts.stale || opts.portfolio) {
-      try {
-        const { curatePortfolio } = await import('../curator/curator.js');
-        await curatePortfolio(cfg);
-        console.log('curated portfolio');
-      } catch (err) {
-        failures += 1;
-        console.error(`FAILED portfolio: ${err instanceof Error ? err.message : String(err)}`);
+    // Writing docs takes the same lock as refresh: two batches never write the same folder.
+    const { withRefreshLock } = await import('./refresh.js');
+    let failures = 0;
+    const run = async (): Promise<void> => {
+      if (repoArg !== undefined) {
+        const { curateRepo } = await import('../curator/curator.js');
+        console.error(`studying ${repoArg} — usually a few minutes…`);
+        const { stats, citations } = await curateRepo(cfg, await getRepoStatus(cfg, repoArg));
+        const notes = [
+          stats !== undefined ? describeRun(stats) : '',
+          describeCitations(citations),
+        ].filter((n) => n.length > 0);
+        console.log(`curated ${repoArg}${notes.length > 0 ? ` — ${notes.join('; ')}` : ''}`);
+      } else if (opts.all === true || opts.stale === true) {
+        // Scanned while holding the lock: a run that has just finished is seen as finished,
+        // not studied again from a picture taken before it ended.
+        const statuses = await listRepoStatuses(cfg);
+        if (statuses.length === 0) {
+          // Not "everything is fresh": there is nothing here at all, which is a setup problem.
+          console.error(
+            fs.existsSync(cfg.reposDir)
+              ? `No git repositories found in ${cfg.reposDir}.`
+              : `The repos folder does not exist yet: ${cfg.reposDir}.`,
+          );
+          process.exitCode = 1;
+          return;
+        }
+        let targets = opts.stale === true ? statuses.filter((s) => s.state !== 'fresh') : statuses;
+        if (opts.stale === true) {
+          // Stale only in docs/CI/lockfiles → re-verified for free, not studied again.
+          const { partitionStale } = await import('./reverify.js');
+          const split = await partitionStale(
+            cfg,
+            targets,
+            undefined,
+            opts.dryRun === true ? 'dry-run' : 'apply',
+          );
+          targets = split.curate;
+          if (split.reverified.length > 0) {
+            console.log(
+              `${split.reverified.length} unchanged in code since last studied — ${
+                opts.dryRun === true ? 'would be re-verified' : 're-verified'
+              } without the model: ${split.reverified.join(', ')}`,
+            );
+          }
+        }
+        const concurrency = opts.concurrency ?? cfg.curateConcurrency;
+        if (opts.dryRun === true) {
+          console.log(
+            targets.length === 0
+              ? 'Nothing to curate — everything is fresh.'
+              : formatDryRun(
+                  targets.map((t) => t.name),
+                  estimateBatch(targets.length, concurrency),
+                ),
+          );
+          return;
+        }
+        if (targets.length === 0) {
+          console.log('Nothing to curate — everything is fresh.');
+        } else {
+          console.log(formatEstimate(estimateBatch(targets.length, concurrency), targets.length));
+          if (
+            opts.yes !== true &&
+            needsConfirmation(targets.length, process.stdin.isTTY) &&
+            !(await confirm('\nStart? [y/N] '))
+          ) {
+            console.log('Stopped. Nothing was studied, nothing was spent.');
+            return;
+          }
+          console.log(`\ncurating ${targets.length} repos, ${concurrency} at a time`);
+        }
+        const { curateMany } = await import('./curate-many.js');
+        failures += (await curateMany(cfg, targets, undefined, concurrency)).length;
       }
-    }
+
+      if (opts.all === true || opts.stale === true || opts.portfolio === true) {
+        try {
+          const { curatePortfolio } = await import('../curator/curator.js');
+          const stats = await curatePortfolio(cfg);
+          console.log(`curated portfolio${stats !== undefined ? ` — ${describeRun(stats)}` : ''}`);
+        } catch (err) {
+          failures += 1;
+          console.error(`FAILED portfolio: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+    };
+    if (opts.dryRun === true) await run();
+    else await withRefreshLock(cfg.knowledgeDir, run);
     if (failures > 0) process.exitCode = 1;
   });
 
 program
   .command('refresh')
-  .description('Update repos, re-study anything out of date (or the named repos), then the portfolio')
+  .description(
+    'Update repos, re-study anything out of date (or the named repos), then the portfolio',
+  )
   .argument('[repos...]', 'limit to these repos and curate them unconditionally')
-  .action(async (repos: string[]) => {
+  .option('-y, --yes', 'do not ask before a long batch')
+  .option(
+    '--dry-run',
+    'show what would be studied, and what it would cost, without syncing or studying',
+  )
+  .action(async (repos: string[], opts: { yes?: boolean; dryRun?: boolean }) => {
     const cfg = loadConfig();
     const { runRefresh } = await import('./refresh.js');
-    const res = await runRefresh(cfg, repos.length > 0 ? repos : undefined);
+    const res = await runRefresh(cfg, repos.length > 0 ? repos : undefined, undefined, {
+      dryRun: opts.dryRun === true,
+      confirm: async (targets) => {
+        console.log(
+          formatEstimate(estimateBatch(targets.length, cfg.curateConcurrency), targets.length),
+        );
+        if (opts.yes === true || !needsConfirmation(targets.length, process.stdin.isTTY))
+          return true;
+        return confirm('\nStart? [y/N] ');
+      },
+    });
+    if (opts.dryRun === true) {
+      if (res.reverified.length > 0)
+        console.log(`would be re-verified without the model: ${res.reverified.join(', ')}`);
+      if (res.uncurated.length > 0) {
+        console.log(
+          `not studied yet, and not studied by a plain refresh: ${res.uncurated.join(', ')} — name them to study them`,
+        );
+      }
+      console.log(
+        res.planned.length === 0
+          ? 'Nothing to study — every studied repo is up to date.\nDry run — nothing was synced, nothing was studied and nothing was spent.'
+          : formatDryRun(res.planned, estimateBatch(res.planned.length, cfg.curateConcurrency)),
+      );
+      return;
+    }
+    if (res.cancelled) {
+      console.log('Stopped. Nothing was studied, nothing was spent.');
+      return;
+    }
+    if (res.syncNote !== null) console.log(res.syncNote);
+    const portfolio =
+      res.portfolioSkipped !== null
+        ? `skipped (${res.portfolioSkipped})`
+        : res.portfolioOk
+          ? 'ok'
+          : 'FAILED';
     console.log(
       `sync: ${res.synced} ok, ${res.syncFailed.length} failed | curate: ${res.curated} ok, ${res.curateFailed.length} failed${
         res.reverified.length > 0 ? `, ${res.reverified.length} re-verified without the model` : ''
-      } | portfolio: ${res.portfolioOk ? 'ok' : 'FAILED'}`,
+      } | portfolio: ${portfolio}`,
     );
     if (res.uncurated.length > 0) {
       console.log(
@@ -511,7 +538,7 @@ program
     }
   });
 
-program.parseAsync().catch((err) => {
+program.parseAsync().catch((err: unknown) => {
   console.error(err instanceof Error ? err.message : String(err));
   process.exit(1);
 });
