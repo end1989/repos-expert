@@ -179,9 +179,14 @@ const MANIFEST_FILES = ['package.json', 'pyproject.toml', 'go.mod', 'Cargo.toml'
  * left unread: like everything the curator reads, it is judged by where it leads.
  */
 function readManifest(repo: string, file: string): string | null {
-  const p = path.join(repo, file);
-  if (!fs.existsSync(p) || !isInside(resolveReal(repo), resolveReal(p))) return null;
-  return fs.readFileSync(p, 'utf8').slice(0, 4000);
+  // The path that was judged is the path that is read, not the link again.
+  const real = resolveReal(path.join(repo, file));
+  if (!isInside(resolveReal(repo), real)) return null;
+  try {
+    return fs.readFileSync(real, 'utf8').slice(0, 4000);
+  } catch {
+    return null; // not there, or not a file
+  }
 }
 
 export async function curatePortfolio(
