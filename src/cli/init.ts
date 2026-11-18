@@ -1,7 +1,9 @@
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { userConfigPath } from '../config.js';
+import { loadConfig, userConfigPath } from '../config.js';
+import { readTextFile } from '../paths.js';
 import { REPOS_LIST_FILENAME, reposListTemplate } from '../repos-list.js';
 
 export const PACKAGE_NAME = 'repos-expert';
@@ -52,14 +54,64 @@ export function clientEntryName(label: string | undefined): string {
   return slug.length === 0 ? PACKAGE_NAME : `${PACKAGE_NAME}-${slug}`;
 }
 
+/**
+ * The entry a second profile is registered under: its --name, else the config file's own
+ * name (`work.json` → work), else the folder holding `expert.config.json`. A label of only
+ * non-Latin letters or punctuation slugs to nothing and would take the default entry, so
+ * it is named after the config's path instead.
+ */
+function profileEntryName(configPath: string, name: string | undefined): string {
+  const file = path.basename(configPath);
+  const label =
+    name !== undefined && name.length > 0
+      ? name
+      : file.toLowerCase() === 'expert.config.json'
+        ? path.basename(path.dirname(path.resolve(configPath)))
+        : path.parse(file).name;
+  const entry = clientEntryName(label);
+  if (entry !== PACKAGE_NAME) return entry;
+  const id = createHash('sha256').update(path.resolve(configPath).toLowerCase()).digest('hex');
+  return `${PACKAGE_NAME}-${id.slice(0, 8)}`;
+}
+
+/**
+ * The folder someone typed or pasted, as an absolute path: quotes from Explorer's "Copy as
+ * path" removed, `~` expanded (only a shell would otherwise), and a relative answer read
+ * from where they ran the command — not from wherever the config ends up.
+ */
+export function resolveFolderAnswer(
+  input: string,
+  cwd: string = process.cwd(),
+  home: string = os.homedir(),
+): string {
+  let p = input.trim();
+  const quoted = /^"(.*)"$/.exec(p) ?? /^'(.*)'$/.exec(p);
+  if (quoted !== null) p = (quoted[1] ?? '').trim();
+  if (p === '~' || p.startsWith('~/') || p.startsWith('~\\')) p = path.join(home, p.slice(1));
+  return path.resolve(cwd, p);
+}
+
+/** Two paths name the same place, compared the platform's way (ignoring case on Windows). */
+function samePath(a: string, b: string): boolean {
+  return path.relative(path.resolve(a), path.resolve(b)) === '';
+}
+
 /** Where Claude Desktop keeps its MCP server list, or null on platforms without it. */
-export function claudeDesktopConfigPath(platform: NodeJS.Platform = process.platform): string | null {
+export function claudeDesktopConfigPath(
+  platform: NodeJS.Platform = process.platform,
+): string | null {
   const appData = process.env.APPDATA;
   if (platform === 'win32' && appData !== undefined && appData.length > 0) {
     return path.join(appData, 'Claude', 'claude_desktop_config.json');
   }
   if (platform === 'darwin') {
-    return path.join(os.homedir(), 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json');
+    return path.join(
+      os.homedir(),
+      'Library',
+      'Application Support',
+      'Claude',
+      'claude_desktop_config.json',
+    );
   }
   return null;
 }
@@ -95,7 +147,19 @@ export function mcpLaunchCommand(
   return { command: nodeExecPath, args: [normalized, 'mcp', ...profile] };
 }
 
-/** Adds our server to a client config without disturbing anything already there. */
+/** The config an entry's args name with --config, or null for the default profile. */
+function configNamedBy(args: unknown): string | null {
+  if (!Array.isArray(args)) return null;
+  const at = args.indexOf('--config');
+  const value: unknown = at === -1 ? undefined : args[at + 1];
+  return typeof value === 'string' ? value : null;
+}
+
+/**
+ * Adds our server to a client config without disturbing anything already there: other
+ * servers, other keys, and fields the user added to our own entry (an `env`, say). An entry
+ * under the same key that belongs to another collection is refused, not replaced.
+ */
 export function mergeClientConfig(
   existingJson: string | null,
   command: string,
@@ -104,25 +168,57 @@ export function mergeClientConfig(
 ): string {
   let existing: Record<string, unknown> = {};
   if (existingJson !== null && existingJson.trim().length > 0) {
+    let parsed: unknown;
     try {
-      existing = JSON.parse(existingJson) as Record<string, unknown>;
+      parsed = JSON.parse(existingJson);
     } catch {
       throw new Error('The existing Claude Desktop config is not valid JSON — left it untouched.');
     }
+    if (!isPlainObject(parsed)) {
+      throw new Error(
+        'The existing Claude Desktop config is not a JSON object — left it untouched.',
+      );
+    }
+    existing = parsed;
   }
-  const servers = { ...((existing.mcpServers as Record<string, unknown> | undefined) ?? {}) };
-  servers[key] = { command, args };
+  const prior = existing.mcpServers;
+  const servers: Record<string, unknown> = isPlainObject(prior) ? { ...prior } : {};
+  const before = servers[key];
+  if (isPlainObject(before)) {
+    const theirs = configNamedBy(before.args);
+    const ours = configNamedBy(args);
+    const same = theirs === null || ours === null ? theirs === ours : samePath(theirs, ours);
+    if (!same) {
+      throw new Error(
+        `Claude Desktop already has a "${key}" entry for another collection (${theirs ?? 'the default config'}) — left it untouched. Give this one a different --name.`,
+      );
+    }
+  }
+  servers[key] = { ...(isPlainObject(before) ? before : {}), command, args };
   return `${JSON.stringify({ ...existing, mcpServers: servers }, null, 2)}\n`;
 }
 
-export function defaultConfigBody(opts: InitOptions, configPath: string = userConfigPath()): string {
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+export function defaultConfigBody(
+  opts: InitOptions,
+  configPath: string = userConfigPath(),
+): string {
   const body: Record<string, unknown> = {};
   if (opts.githubUser !== undefined && opts.githubUser.length > 0) {
     body.githubUser = opts.githubUser;
   }
   body.reposDir = (opts.reposDir ?? path.join(os.homedir(), 'repos')).replace(/\\/g, '/');
-  // Knowledge lives beside its config, so a second profile gets its own knowledge base.
-  body.knowledgeDir = path.join(path.dirname(configPath), 'knowledge').replace(/\\/g, '/');
+  // Knowledge lives beside its config, so a second profile gets its own knowledge base —
+  // and is named after the config file, so two configs kept in one folder do not share one.
+  const file = path.basename(configPath);
+  const folder =
+    file.toLowerCase() === 'expert.config.json'
+      ? 'knowledge'
+      : `knowledge-${path.parse(file).name}`;
+  body.knowledgeDir = path.join(path.dirname(configPath), folder).replace(/\\/g, '/');
   body.model = 'claude-sonnet-5';
   body.excludeRepos = [];
   body.includeArchived = false;
@@ -212,71 +308,112 @@ export function suggestReposDir(candidates = reposDirCandidates()): string {
   return candidates.find((c) => holdsGitRepos(c)) ?? candidates[0] ?? defaultReposDir();
 }
 
-/** reposDir from a config already on disk, resolved the same way loadConfig resolves it. */
-function configuredReposDir(configPath: string): string | null {
+/** The folders a config really uses, read the way every command reads them. */
+function configuredFolders(
+  configPath: string,
+): { reposDir: string; reposListFile: string } | { problem: string } {
   try {
-    const raw = JSON.parse(fs.readFileSync(configPath, 'utf8')) as { reposDir?: unknown };
-    if (typeof raw.reposDir !== 'string' || raw.reposDir.length === 0) return null;
-    return path.resolve(path.dirname(configPath), raw.reposDir);
-  } catch {
-    return null;
+    const cfg = loadConfig(configPath);
+    return { reposDir: cfg.reposDir, reposListFile: cfg.reposListFile };
+  } catch (err) {
+    return { problem: err instanceof Error ? err.message : String(err) };
   }
+}
+
+/**
+ * `--force` over an existing config: the old one is backed up (the first backup is kept),
+ * and only what was asked for changes — the excluded repos, the spending cap and the model
+ * endpoint someone set up survive a change of folder.
+ */
+function forceConfig(opts: InitOptions, configPath: string, askedFor: string | undefined): string {
+  const backup = `${configPath}.backup`;
+  if (!fs.existsSync(backup)) fs.copyFileSync(configPath, backup);
+  let current: unknown = null;
+  try {
+    current = JSON.parse(readTextFile(configPath));
+  } catch {
+    current = null;
+  }
+  if (!isPlainObject(current)) {
+    fs.writeFileSync(configPath, defaultConfigBody({ ...opts, reposDir: askedFor }, configPath));
+    return `Replaced ${configPath}, which could not be read; the previous version is in ${backup}`;
+  }
+  const updated: Record<string, unknown> = { ...current };
+  if (askedFor !== undefined) updated.reposDir = askedFor.replace(/\\/g, '/');
+  if (opts.githubUser !== undefined && opts.githubUser.length > 0) {
+    updated.githubUser = opts.githubUser;
+  }
+  fs.writeFileSync(configPath, `${JSON.stringify(updated, null, 2)}\n`);
+  return `Updated ${configPath}, keeping its other settings; the previous version is in ${backup}`;
 }
 
 export function runInit(opts: InitOptions, paths: InitPaths): InitResult {
   const notes: string[] = [];
   let configWritten = false;
 
-  let reposDir = opts.reposDir ?? defaultReposDir();
+  if (fs.existsSync(paths.configPath) && fs.statSync(paths.configPath).isDirectory()) {
+    throw new Error(
+      `${paths.configPath} is a folder: --config names the config file itself, such as ${path.join(paths.configPath, 'expert.config.json')}`,
+    );
+  }
+  const askedFor = opts.reposDir !== undefined ? resolveFolderAnswer(opts.reposDir) : undefined;
 
-  if (fs.existsSync(paths.configPath) && opts.force !== true) {
-    notes.push(`Config already exists, left alone: ${paths.configPath}`);
-    // Report — and set up — the folder the tool will really read, not the one asked
-    // for. Otherwise init cheerfully describes a folder nothing ever looks in.
-    const configured = configuredReposDir(paths.configPath);
-    if (configured !== null) {
-      if (opts.reposDir !== undefined && path.resolve(opts.reposDir) !== configured) {
-        notes.push(`It points at ${configured} — re-run with --force to change that.`);
-      }
-      reposDir = configured;
-    }
-  } else {
+  if (!fs.existsSync(paths.configPath)) {
     fs.mkdirSync(path.dirname(paths.configPath), { recursive: true });
-    fs.writeFileSync(paths.configPath, defaultConfigBody(opts, paths.configPath));
+    fs.writeFileSync(
+      paths.configPath,
+      defaultConfigBody({ ...opts, reposDir: askedFor }, paths.configPath),
+    );
     configWritten = true;
+  } else if (opts.force === true) {
+    notes.push(forceConfig(opts, paths.configPath, askedFor));
+    configWritten = true;
+  } else {
+    notes.push(`Config already exists, left alone: ${paths.configPath}`);
+  }
+
+  // Report — and set up — the folders the tool will really read, not the ones asked for.
+  // Otherwise init cheerfully describes a folder nothing ever looks in.
+  let reposDir = askedFor ?? defaultReposDir();
+  let listPath: string | null = null;
+  const configured = configuredFolders(paths.configPath);
+  if ('problem' in configured) {
+    notes.push(`The config could not be read, so no folders were set up: ${configured.problem}`);
+  } else {
+    if (!configWritten && askedFor !== undefined && !samePath(askedFor, configured.reposDir)) {
+      notes.push(`It points at ${configured.reposDir} — re-run with --force to change that.`);
+    }
+    reposDir = configured.reposDir;
+    listPath = configured.reposListFile;
   }
 
   // A second profile is any config that is not the per-user default: it gets its own
   // client entry, and the server is told which config to load.
   const isProfile =
-    paths.defaultConfigPath !== undefined &&
-    path.resolve(paths.configPath) !== path.resolve(paths.defaultConfigPath);
-  const clientEntry = isProfile
-    ? clientEntryName(
-        opts.name !== undefined && opts.name.length > 0
-          ? opts.name
-          : path.basename(path.dirname(path.resolve(paths.configPath))),
-      )
-    : PACKAGE_NAME;
+    paths.defaultConfigPath !== undefined && !samePath(paths.configPath, paths.defaultConfigPath);
+  const clientEntry = isProfile ? profileEntryName(paths.configPath, opts.name) : PACKAGE_NAME;
   let reposListPath: string | null = null;
 
   // The list is the answer to "I have an empty folder, now what?" — so it is written
   // even when the workspace guide is skipped, and it is never silently replaced.
-  const listPath = path.join(reposDir, REPOS_LIST_FILENAME);
-  try {
-    fs.mkdirSync(reposDir, { recursive: true });
-    if (fs.existsSync(listPath)) {
-      notes.push(`Your project list is already there: ${listPath}`);
-    } else {
-      fs.writeFileSync(listPath, reposListTemplate());
-      notes.push(`Wrote your project list: ${listPath} — put git URLs in it, one per line.`);
+  if (listPath !== null) {
+    try {
+      fs.mkdirSync(path.dirname(listPath), { recursive: true });
+      if (fs.existsSync(listPath)) {
+        notes.push(`Your project list is already there: ${listPath}`);
+      } else {
+        fs.writeFileSync(listPath, reposListTemplate());
+        notes.push(`Wrote your project list: ${listPath} — put git URLs in it, one per line.`);
+      }
+      reposListPath = listPath;
+    } catch (err) {
+      notes.push(
+        `Could not write ${listPath}: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
-    reposListPath = listPath;
-  } catch (err) {
-    notes.push(`Could not write ${listPath}: ${err instanceof Error ? err.message : String(err)}`);
   }
 
-  if (opts.skipWorkspaceGuide !== true) {
+  if (opts.skipWorkspaceGuide !== true && !('problem' in configured)) {
     const guidePath = path.join(reposDir, 'CLAUDE.md');
     if (fs.existsSync(guidePath)) {
       notes.push(`Left your existing ${guidePath} alone.`);
@@ -307,20 +444,32 @@ export function runInit(opts: InitOptions, paths: InitPaths): InitResult {
       isProfile ? path.resolve(paths.configPath) : null,
     );
     const existing = fs.existsSync(paths.clientConfigPath)
-      ? fs.readFileSync(paths.clientConfigPath, 'utf8')
+      ? readTextFile(paths.clientConfigPath)
       : null;
+    // Merged first: a config that cannot be parsed throws here, before anything is copied
+    // or written, and is left exactly as it was.
+    const merged = mergeClientConfig(existing, command, args, clientEntry);
+    const backup = `${paths.clientConfigPath}.backup`;
     if (existing !== null) {
-      fs.copyFileSync(paths.clientConfigPath, `${paths.clientConfigPath}.backup`);
-      notes.push(`Backed up the previous Claude Desktop config to ${paths.clientConfigPath}.backup`);
+      // The first backup is the one worth keeping — the user's config from before this
+      // tool ever touched it. A second run must not replace it with its own output.
+      if (fs.existsSync(backup)) {
+        notes.push(`Kept the earlier backup of the Claude Desktop config: ${backup}`);
+      } else {
+        fs.copyFileSync(paths.clientConfigPath, backup);
+        notes.push(`Backed up the previous Claude Desktop config to ${backup}`);
+      }
     }
     fs.mkdirSync(path.dirname(paths.clientConfigPath), { recursive: true });
-    fs.writeFileSync(paths.clientConfigPath, mergeClientConfig(existing, command, args, clientEntry));
+    fs.writeFileSync(paths.clientConfigPath, merged);
     clientWritten = true;
     if (isProfile) {
       notes.push(`Registered as "${clientEntry}" in Claude Desktop, alongside any other profiles.`);
     }
     if (command === 'npx') {
-      notes.push('Claude Desktop will launch the newest published version through npx (needs network at launch).');
+      notes.push(
+        'Claude Desktop will launch the newest published version through npx (needs network at launch).',
+      );
     } else {
       const fromNpm = (args[0] ?? '').includes('/node_modules/');
       notes.push(
